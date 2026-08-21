@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "default_backend": "github",
+  "updated_at": "2026-08-21T14:32:17Z",
+  "updated_by": "fatih",
+  "reason": "initial_observe_mode",
+  "overrides": {}
+}

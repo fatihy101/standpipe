@@ -1,0 +1,36 @@
+-- 0002_prior_dispatch — keep the superseded attempt's dispatch evidence.
+--
+-- A retry runs the run-link resolver against the ORIGINAL attempt's window
+-- before dispatching again, so it has to know whether any earlier attempt on
+-- the key ever posted. The crash-recovery sweep, meanwhile, decides from
+-- dispatch_started_at when an attempt has gone quiet.
+--
+-- Why a new column instead of simply not clearing dispatch_started_at:
+--
+-- dispatch_started_at is not a history, it is the LIVENESS CLOCK of whichever
+-- attempt currently owns the row. The sweep reads it as a discriminator —
+-- non-NULL means "this attempt is inside a GitHub call", so the row is
+-- measured against upstream_timeout (tens of seconds); NULL means "still
+-- queued", so it is measured against max_queue_wait (seconds). A reclaiming
+-- attempt that inherited the previous attempt's stamp would therefore be
+-- measured from a timestamp that is already older than the cutoff and would be
+-- flipped to `unknown` on the very next tick, while its own dispatch was still
+-- being prepared: the reclaim-versus-sweep race this column's discipline
+-- exists to prevent, reintroduced.
+--
+-- So the evidence cannot live in that column, and it is put in its own:
+--
+--   prior_dispatch_started_at — the most recent moment at which ANY superseded
+--   attempt on this key began a dispatch. Nothing reads it as liveness, and
+--   the reclaim CAS carries it forward with
+--   COALESCE(dispatch_started_at, prior_dispatch_started_at), so the fact
+--   survives a CHAIN of reclaims: attempt 1 posts, attempt 2 dies before its
+--   own stamp, attempt 3 is still told that something was posted.
+--
+-- Without it, ReserveResult.OriginalDispatchAt is NULL on the third attempt,
+-- internal/forge reads that as "nothing was ever posted" — which is sound only
+-- because MarkDispatchStarted commits before the POST — and the resolver's
+-- tier 3 (the time-window search, internal/forge/doc.go) is skipped on a key
+-- that really did reach GitHub.
+
+ALTER TABLE idempotency ADD COLUMN prior_dispatch_started_at INTEGER;

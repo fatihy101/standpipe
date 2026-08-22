@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/fatihy101/standpipe/internal/config"
+	"github.com/fatihy101/standpipe/internal/forge"
 	"github.com/fatihy101/standpipe/internal/httpapi"
 )
 
@@ -60,6 +61,19 @@ func runConfigValidate(args []string) error {
 	if err := cfg.CheckFiles(); err != nil {
 		fmt.Printf("warning: %v\n", err)
 	}
+	// A key that IS there and cannot be parsed is a different fact, and it is
+	// an ERROR (the missing-vs-corrupt asymmetry).
+	//
+	// Missing is a deployment fact about another host; corrupt is a mistake on
+	// this one, and `standpiped` refuses to start on it. Answering `valid:
+	// true` for a key the daemon cannot load is a silent
+	// SUCCESS: nothing errors, the parse simply never happens, and the command
+	// reports fine. Measured 2026-08-22 — a truncated PEM, a mutated DER body,
+	// an EC key and plain garbage all passed.
+	if err := checkAppKey(cfg); err != nil {
+		fmt.Fprintf(os.Stdout, "valid: false\n\n%v\n", err)
+		os.Exit(1)
+	}
 
 	fmt.Println("valid: true")
 	fmt.Printf("listen: %s   admin_listen: %s\n", cfg.Gateway.Listen, cfg.Gateway.AdminListen)
@@ -69,6 +83,35 @@ func runConfigValidate(args []string) error {
 	// the trigger path will actually use.
 	fmt.Printf("github.return_run_details (resolved): %t\n", cfg.GitHub.Tier1Armed())
 	return nil
+}
+
+// checkAppKey answers "would standpiped be able to load this key?" — by
+// running the loader standpiped runs, not by re-implementing it.
+//
+// forge.New reads github.private_key_path from disk and does NO network I/O
+// (its doc: "it fails fast on a misconfigured or unreadable credential rather
+// than at first dispatch"), so this is the daemon's own verdict and cannot
+// drift from it. A second PEM parser living in internal/config would compile,
+// pass vet, and diverge invisibly the first time either side learned a new key
+// format — the shape of [[token-format-regex-contradiction]], where a local
+// copy of a rule was not a fix.
+//
+// It returns nil when the file is absent: absence is CheckFiles's business and
+// is reported by the caller as a warning. config.Load has already validated
+// that app_id is positive and private_key_path is non-empty, so any error from
+// here is about the key material itself.
+func checkAppKey(cfg *config.Config) error {
+	if cfg.GitHub.PrivateKeyPath == "" {
+		return nil
+	}
+	if _, err := os.Stat(cfg.GitHub.PrivateKeyPath); err != nil {
+		return nil
+	}
+	_, err := forge.New(forge.Config{
+		AppID:          cfg.GitHub.AppID,
+		PrivateKeyPath: cfg.GitHub.PrivateKeyPath,
+	})
+	return err
 }
 
 // runToken implements `standpipe token create`.

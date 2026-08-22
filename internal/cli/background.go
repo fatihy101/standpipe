@@ -88,6 +88,12 @@ func (b *background) runInventory(ctx context.Context, phase string) {
 	}
 
 	for _, res := range results {
+		// /readyz's github_reachable is fed from here, and this is the only
+		// producer that matters in the deployment the field is read in: when
+		// the App credential is wrong, NO dispatch ever gets far enough to
+		// report, and these bootstrap failures are the entire evidence that
+		// GitHub is answering at all.
+		b.srv.NoteGitHubCall(res.Err)
 		if res.Err != nil {
 			// Not fatal, and not hidden. gateway_target_unavailable is set by
 			// internal/forge on the same failure.

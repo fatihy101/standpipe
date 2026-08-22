@@ -150,7 +150,23 @@ func (r *rejectLogger) Write(ctx context.Context, ev store.TriggerRejectedEvent)
 }
 
 // Coalesce records a 429 into the caller's open window.
+//
+// A coalesced row carries NO reason_text, ever. The row stands for N requests
+// and N callers' free-text reasons cannot be one string: keeping the first
+// would make the field read as representative of a window it describes only by
+// accident, and an operator reading `suppressed_count: 40` next to one
+// sentence will take that sentence as the account of all forty. There is no
+// honest single value, so there is none — the honest statement about the
+// window is `suppressed_count`, which is already there.
+//
+// The clear is unconditional and stays unconditional. It is currently also
+// unreached: reqCtx admits the reason immediately AFTER step 8 allows the
+// request, so a coalesced 429 never carries one to begin with. That is a
+// property of one line's placement in handleTrigger; this one is a property of
+// every 429 row there will ever be, and it is the one that must not depend on
+// the other. Do not delete it as dead code.
 func (r *rejectLogger) Coalesce(ev store.TriggerRejectedEvent) {
+	ev.ReasonText = ""
 	now := r.now()
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"sort"
 	"strings"
@@ -160,6 +161,11 @@ func Parse(raw []byte) (*Config, error) {
 	}
 	cfg.Warnings = warnings
 	cfg.applyDefaults()
+	// Canonicalisation runs BEFORE Validate so the error messages Validate
+	// prints quote the same strings the gateway will actually use, and AFTER
+	// applyDefaults so it is part of "what Load produces" rather than a step a
+	// caller could skip.
+	cfg.Warnings = append(cfg.Warnings, cfg.canonicaliseWatchIPs()...)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -276,6 +282,61 @@ func (c *Config) applyDefaults() {
 			c.Callers[name] = caller
 		}
 	}
+}
+
+// canonicaliseWatchIPs rewrites observability.watch_ips into the one spelling
+// the matcher can ever see, and returns a warning naming both spellings for
+// every entry it had to change.
+//
+// # Why this exists
+//
+// The watch list matches EXACTLY against the normalised source_ip, and internal/httpapi normalises the observed address
+// with netip.ParseAddr(...).Unmap().String() on every request. The configured
+// side was stored verbatim, so `0:0:0:0:0:0:0:1`, `2001:DB8::1` and
+// `::ffff:192.0.2.7` all passed `config validate` — Validate accepts anything
+// ParseAddr parses — and then matched nothing, forever.
+//
+// That failure had no symptom at all. By design an empty watch list
+// emits no series, not even a zero one, so "my entry never matches" and
+// "watching is off, as designed" produced byte-identical evidence: no error,
+// no log line, no series on /metrics. A silent success: the work simply never
+// happens and nothing says so.
+//
+// # Why canonicalise rather than reject
+//
+// The entry is semantically fine; only its spelling is. Rejecting would refuse
+// a config that has been correct all along, on a key whose whole purpose is
+// diagnostic. Canonicalising means such a file keeps loading and starts doing
+// what its author meant.
+//
+// # Why it still warns
+//
+// Silence would leave the operator's file saying one thing while the system
+// does another. The warning is the loud half of the repair and names both
+// spellings so the file can be brought into line; it is a warning and not an
+// error because nothing is broken.
+//
+// An entry ParseAddr rejects is left exactly as the operator typed it, so
+// Validate reports it as the error it is rather than this function eating it.
+func (c *Config) canonicaliseWatchIPs() []string {
+	var warnings []string
+	for i, entry := range c.Observability.WatchIPs {
+		addr, err := netip.ParseAddr(entry)
+		if err != nil {
+			continue
+		}
+		canonical := addr.Unmap().String()
+		if canonical == entry {
+			continue
+		}
+		c.Observability.WatchIPs[i] = canonical
+		warnings = append(warnings, fmt.Sprintf(
+			"observability.watch_ips[%d]: %q is not the canonical spelling of that address and has been read as %q. "+
+				"The observed address is always canonical, so %q on its own would have matched nothing and said nothing. "+
+				"Write %q in standpipe.yaml.",
+			i, entry, canonical, entry, canonical))
+	}
+	return warnings
 }
 
 func defaultBucket(b *Bucket, rate float64, burst int) {

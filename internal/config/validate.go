@@ -233,8 +233,21 @@ func (c *Config) Validate() error {
 	default:
 		errs = append(errs, fmt.Errorf("observability.log_format must be json or text, got %q", c.Observability.LogFormat))
 	}
+	// At most 32 entries, enforced by `config validate`. The cap is what makes the cardinality of
+	// gateway_watched_ip_rejected_total a configuration fact — 32 × |reason| =
+	// 64 series — rather than something callers can grow.
+	if n := len(c.Observability.WatchIPs); n > MaxWatchIPs {
+		errs = append(errs, fmt.Errorf("observability.watch_ips: %d entries, at most %d are allowed; the metric's cardinality ceiling is this cap × |reason|", n, MaxWatchIPs))
+	}
 	for i, ip := range c.Observability.WatchIPs {
 		if _, err := netip.ParseAddr(ip); err != nil {
+			// Phase 0 entries are whole addresses. A prefix is called out by name
+			// because it is the plausible mistake, and "is not an IP address"
+			// reads as a typo report rather than as an unsupported feature.
+			if _, perr := netip.ParsePrefix(ip); perr == nil {
+				errs = append(errs, fmt.Errorf("observability.watch_ips[%d]: %q is a CIDR prefix; Phase 0 takes whole IP addresses only", i, ip))
+				continue
+			}
 			errs = append(errs, fmt.Errorf("observability.watch_ips[%d]: %q is not an IP address", i, ip))
 		}
 	}

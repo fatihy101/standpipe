@@ -92,7 +92,7 @@ func (e eventObj) parent() string { return e.str("trigger_event_id") }
 // Two store methods would collapse both to an index seek, and the need is
 // recorded as an internal/store interface request rather than worked
 // around by opening a second database handle and writing SQL here — that would
-// put schema knowledge in package main, where nobody maintaining
+// put schema knowledge in internal/cli, where nobody maintaining
 // internal/store would think to look for it.
 //
 // fn returning an error stops the scan and closes the reader, which unblocks

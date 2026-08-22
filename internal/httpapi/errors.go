@@ -43,9 +43,22 @@ const (
 	DetailWorkflowNotFound     = "workflow_not_found"
 	DetailInstallationNotFound = "installation_not_found"
 	DetailCredentialExpired    = "credential_expired"
-	DetailNotInAllowlist       = "not_in_allowlist"
-	DetailCallerPolicy         = "caller_policy"
-	DetailUnknownPath          = "unknown_path"
+
+	// DetailAppNotFound was added after the original error table —
+	// internal/forge minted
+	// forge.KindAppNotFound on 2026-08-22 after measuring that GitHub answers
+	// 404 "Integration not found" when github.app_id names no App at all, as
+	// opposed to the bare 404 that means the lookup found no installation. It
+	// maps to 503 backend_unreachable, the "identity problem" row.
+	//
+	// It is deliberately NOT DetailInstallationNotFound. Those two details are
+	// the entire caller-visible carrier of a distinction forge established by
+	// reading the response body, and the remedies do not overlap: no amount of
+	// installing an App fixes an app_id that names none.
+	DetailAppNotFound    = "app_not_found"
+	DetailNotInAllowlist = "not_in_allowlist"
+	DetailCallerPolicy   = "caller_policy"
+	DetailUnknownPath    = "unknown_path"
 )
 
 // The fixed Retry-After values.
@@ -71,7 +84,11 @@ type apiError struct {
 
 	// UpstreamStatus is emitted only on 502 upstream_error.
 	UpstreamStatus int
-	// Repo is emitted only on 503 installation_not_found.
+	// Repo is emitted only on 503 installation_not_found (the error table's row
+	// `{"error": "backend_unreachable", "detail": "installation_not_found",
+	// "repo": "acme/core"}`). upstreamError is the ONE constructor that sets
+	// it; a repo on any other row would be a target name echoed where the
+	// contract does not ask for one.
 	Repo string
 	// UnsupportedKeys is emitted only on 422 unsupported_inputs.
 	UnsupportedKeys []string
@@ -216,7 +233,15 @@ func storageError(err error) apiError {
 // successful dispatch answers 200 rather than 204, so any predicate built on
 // the numeric status is wrong for half of the deployments: a numeric HTTP
 // status is never a success predicate.
-func upstreamError(err error) apiError {
+//
+// `repo` is the target of the request being answered, in owner/name form. It
+// reaches the body on exactly one row — 503 installation_not_found — and it is
+// a parameter rather than a field on the error because internal/forge does not
+// carry the repo on *forge.Error. Every call site is past step 11, so the
+// value has already been matched against allowed_targets: this echoes a name
+// the caller sent AND the server-side allowlist carries, so it cannot be used
+// to enumerate anything the caller could not already name.
+func upstreamError(err error, repo string) apiError {
 	var e *forge.Error
 	if !errors.As(err, &e) {
 		return apiError{Status: http.StatusBadGateway, Code: ErrUpstreamError, Detail: "upstream call failed"}
@@ -248,8 +273,28 @@ func upstreamError(err error) apiError {
 		}
 
 	case forge.KindInstallationNotFound:
+		// The error table names `repo` on this row and only this row. Without it the
+		// operator reading the caller's failure has to correlate a request id
+		// against the log to learn WHICH repo the App is missing from, which
+		// is the whole content of the "App not installed on this repo" state.
 		return apiError{Status: http.StatusServiceUnavailable, Code: ErrBackendUnreachable,
-			Detail: DetailInstallationNotFound, RetryAfter: 60}
+			Detail: DetailInstallationNotFound, RetryAfter: 60, Repo: repo}
+
+	case forge.KindAppNotFound:
+		// 503 backend_unreachable, the same row as credential_expired: OUR
+		// identity is unusable. Not 502 — a 502 says GitHub misbehaved, and
+		// GitHub answered correctly and quickly; the fault is github.app_id.
+		//
+		// No `repo`: the error table gives that field to installation_not_found, and this
+		// failure is not repo-scoped at all. Every repo fails identically
+		// because the App does not exist, and naming one would point the
+		// operator at the target instead of at the config.
+		//
+		// Retry-After is the credential row's 30s and means what it means
+		// there: come back, an operator can fix this. It is not a claim that
+		// waiting helps.
+		return apiError{Status: http.StatusServiceUnavailable, Code: ErrBackendUnreachable,
+			Detail: DetailAppNotFound, RetryAfter: 30}
 
 	case forge.KindCredentialExpired:
 		return apiError{Status: http.StatusServiceUnavailable, Code: ErrBackendUnreachable,

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -377,6 +378,41 @@ type harness struct {
 	cfg    *config.Config
 	token  string
 	events *testutil.IDSeq
+	logs   *syncBuffer
+}
+
+// syncBuffer is a log sink a test can read.
+//
+// It is mutex-guarded because the reject logger's flush goroutine writes to
+// the same handler as the request goroutines, and a test that reads it while
+// Close() is flushing would otherwise be a data race rather than an
+// assertion.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// lines returns the log lines containing sub.
+func (b *syncBuffer) lines(sub string) []string {
+	var out []string
+	for _, ln := range strings.Split(b.String(), "\n") {
+		if strings.Contains(ln, sub) {
+			out = append(out, ln)
+		}
+	}
+	return out
 }
 
 // newHarness builds a Server over the fakes and serves its public handler.
@@ -395,13 +431,14 @@ func newHarness(t *testing.T, o configOpts) *harness {
 	st := newFakeStore()
 	fd := newFakeDispatcher()
 	reg := metrics.New()
+	logs := &syncBuffer{}
 
 	srv, err := New(Options{
 		Reloader:     config.NewReloader(cfg),
 		Store:        st,
 		Forge:        fd,
 		Metrics:      reg,
-		Log:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log:          slog.New(slog.NewTextHandler(logs, nil)),
 		Version:      "test",
 		Now:          clock.Now,
 		NewEventID:   ids.Next,
@@ -417,7 +454,7 @@ func newHarness(t *testing.T, o configOpts) *harness {
 
 	return &harness{
 		t: t, srv: srv, http: ts, store: st, forge: fd,
-		reg: reg, clock: clock, cfg: cfg, token: token, events: ids,
+		reg: reg, clock: clock, cfg: cfg, token: token, events: ids, logs: logs,
 	}
 }
 

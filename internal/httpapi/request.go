@@ -72,6 +72,17 @@ func contentTypeOK(h string) bool {
 // header is whatever the client wrote, so trusting it lets any caller pick its
 // own rate-limit bucket; the right end is what our own proxy appended. If no
 // proxy is configured, the header is ignored entirely.
+//
+// # One address, one spelling
+//
+// Every parseable return path here ends in Unmap().String(), so a given
+// address has exactly one spelling in source_ip, in the pre-auth limiter key
+// and in the watch-list match. That is a correctness property, not tidiness:
+// the XFF and X-Real-Ip paths used to return the un-Unmapped form, so the same
+// host arriving direct and arriving proxied as ::ffff:192.0.2.7 produced two
+// limiter buckets and two source_ip values, and config's canonical
+// watch_ips entry matched only one of them. An unparseable hop is still
+// returned verbatim — it is not an address, and inventing one would be worse.
 func clientIP(r *http.Request, trusted []netip.Prefix) string {
 	remote := hostOf(r.RemoteAddr)
 	if len(trusted) == 0 {
@@ -91,7 +102,7 @@ func clientIP(r *http.Request, trusted []netip.Prefix) string {
 	}
 	if v := strings.TrimSpace(r.Header.Get("X-Real-Ip")); v != "" {
 		if addr, err := netip.ParseAddr(v); err == nil {
-			return addr.String()
+			return addr.Unmap().String()
 		}
 	}
 	return remote
@@ -106,7 +117,7 @@ func forwardedChain(r *http.Request) []string {
 				continue
 			}
 			if addr, err := netip.ParseAddr(part); err == nil {
-				out = append(out, addr.String())
+				out = append(out, addr.Unmap().String())
 			} else {
 				// An unparseable hop still counts as a hop: skipping it would
 				// let a caller hide the real chain by writing garbage.
@@ -191,10 +202,10 @@ func validateBody(raw []byte) (triggerBody, map[string]string, error) {
 		return body, nil, err
 	}
 
-	if utf8.RuneCountInString(body.Reason) > maxReasonRunes {
-		return body, nil, fmt.Errorf("field \"reason\" exceeds %d characters", maxReasonRunes)
+	if err := validateReason(body.Reason); err != nil {
+		return body, nil, err
 	}
-	if !utf8.ValidString(body.Reason) || !utf8.ValidString(body.Ref) {
+	if !utf8.ValidString(body.Ref) {
 		return body, nil, errors.New("body must be valid UTF-8")
 	}
 
@@ -207,6 +218,23 @@ func validateBody(raw []byte) (triggerBody, map[string]string, error) {
 		return body, nil, err
 	}
 	return body, inputs, nil
+}
+
+// validateReason is the rule for the `reason` field, on its own.
+//
+// It is factored out of validateBody because trigger_rejected's reason_text admission
+// (reqCtx.admitReason) has to apply the SAME rule to a body that FAILED
+// validation — the value may be the very thing that was wrong. A second copy
+// of "1024 runes and valid UTF-8" would be free to drift from this one, and
+// the drift would show up as a column holding a value the schema forbids.
+func validateReason(reason string) error {
+	if utf8.RuneCountInString(reason) > maxReasonRunes {
+		return fmt.Errorf("field \"reason\" exceeds %d characters", maxReasonRunes)
+	}
+	if !utf8.ValidString(reason) {
+		return errors.New("body must be valid UTF-8")
+	}
+	return nil
 }
 
 // validateFullRef: a short ref name is not accepted.

@@ -50,6 +50,19 @@ type Def struct {
 	Help    string
 	Labels  []string
 	Buckets []float64
+
+	// NotEmitted carries the catalog's "†" — declared in the table, emitted by no
+	// code path yet. The state has to be carried rather than dropped: a row
+	// nobody implements is invisible to Drift(), which only ever sees what the
+	// code recorded, so dropping it is precisely how such a row goes missing.
+	//
+	// It is load-bearing in two places. New() does not seed a zero series for
+	// it, so a metric the table says is not emitted is also absent from
+	// /metrics — otherwise the transcription would put a line on the wire and
+	// make the table's own claim false. And recording under such a name is
+	// itself a drift entry: the code overtook the table, which is the same
+	// class of disagreement as an undeclared name.
+	NotEmitted bool
 }
 
 // DefaultBuckets covers a gateway hop plus a 10s upstream timeout.
@@ -59,19 +72,32 @@ var DefaultBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5,
 // and seconds when busy_timeout is being burned.
 var writeBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 5}
 
-// Catalog is the metrics table, in its order.
+// Catalog is the metrics table, in its order — all thirty rows, name, type and
+// label set.
 //
-// Two entries disagree with what internal/forge actually emits today. They are
-// transcribed AS THE TABLE WRITES THEM and the disagreement is reported rather
-// than papered over here (code bends to the spec):
+// It began as a hand transcription of a document, and on 2026-08-22 three of
+// its rows were wrong: gateway_target_unavailable carried a {workflow} label the
+// table had already removed, and gateway_pre_auth_lru_evicted_total and
+// gateway_run_name_absent_total were missing outright. The middle one is
+// the instructive failure — the label set the table declares and the label set
+// internal/forge/identity.go emits AGREED, and the transcription alone made
+// Drift() non-empty, on the very field the admin /healthz publishes as metrics_drift. A
+// runtime drift surface cannot audit the copy that defines it, so the copy has
+// to be compared against the table itself by something executable.
 //
-//   - gateway_github_secondary_rate_limit_total is declared {installation_id};
-//     internal/forge/client.go emits {repo}.
-//   - gateway_target_unavailable is declared {repo, workflow};
-//     internal/forge/inventory.go emits {repo}.
+// The two earlier code-side divergences recorded here are both closed and the
+// note is kept so neither is reopened by memory: the table declares
+// gateway_github_secondary_rate_limit_total{installation_id} and client.go now
+// emits that, and gateway_target_unavailable is {repo} on both sides (a gauge
+// may not carry a label its reset path cannot bind).
 //
-// Both therefore land in Drift() at runtime, which is exactly the surface this
-// package exists to provide.
+// One row disagreed with the original design document, and it was the
+// document's side: it marked gateway_watched_ip_rejected_total with "†",
+// declared and not yet emitted, while internal/httpapi/trigger.go already
+// emitted it. Only the annotation was stale — the row's name, type and labels
+// are correct — so the row is carried without NotEmitted. Setting the flag would put a permanent entry in Drift() for every
+// deployment that configures observability.watch_ips, which is the noise this
+// transcription was repaired to remove.
 func Catalog() []Def {
 	return []Def{
 		{Name: "gateway_trigger_total", Kind: KindCounter, Labels: []string{"repo", "workflow", "status"},
@@ -97,10 +123,36 @@ func Catalog() []Def {
 			Help: "Coverage gap percentage. Never reaches zero; the structural half is by design."},
 		{Name: "gateway_inventory_coverage_unknown_pct", Kind: KindGauge,
 			Help: "Unknown-coverage percentage. Never summed with the gap gauge."},
-		{Name: "gateway_target_unavailable", Kind: KindGauge, Labels: []string{"repo", "workflow"},
+		// {repo} only. The gauge-label rule: a gauge's label set must be exactly the
+		// dimensions BOTH the path that writes 1 and the path that writes 0
+		// hold. Installation reachability is a repo-level fact and recovery
+		// writes a single 0; a {workflow} label would clear one series and
+		// leave every other workflow of that repo pinned at 1 for the process
+		// lifetime. An alarm that never goes out is worse than a missing
+		// dimension.
+		{Name: "gateway_target_unavailable", Kind: KindGauge, Labels: []string{"repo"},
 			Help: "1 when the App is not installed on the target or it cannot be reached."},
 		{Name: "gateway_auth_failures_total", Kind: KindCounter,
 			Help: "Requests refused before authentication succeeded. Carries no IP label."},
+
+		// The single exception to the cardinality rule. Emitted only
+		// for an address written in observability.watch_ips, and the label
+		// value is the CONFIGURED entry rather than the observed IP, so the
+		// ceiling is 32 × |reason| = 64 series and belongs to configuration,
+		// not to callers. With the default empty list the metric never appears.
+		{Name: "gateway_watched_ip_rejected_total", Kind: KindCounter, Labels: []string{"ip", "reason"},
+			Help: "Pre-auth rejections from an IP on observability.watch_ips."},
+
+		// †: declared, emitted by nothing. The pre-auth IP limiter
+		// is a fixed-capacity LRU (10,000 entries) and an evicted entry resets
+		// that IP's count, which is how a rotating source outlives the limit —
+		// a degradation with no error and no external symptom. Unlabelled on purpose: which IP was evicted is exactly what
+		// must not be published, and the question is whether the store is under
+		// pressure. Carried here so the row is not lost again; NotEmitted keeps
+		// it off the wire until it is implemented.
+		{Name: "gateway_pre_auth_lru_evicted_total", Kind: KindCounter, NotEmitted: true,
+			Help: "Pre-auth IP limiter LRU evictions. Declared in the catalog, not emitted yet; non-zero reopens the fixed-capacity decision."},
+
 		{Name: "gateway_workflow_cache_cold_total", Kind: KindCounter, Labels: []string{"repo", "workflow"},
 			Help: "Requests served against a never-fetched workflow definition, so input validation was skipped."},
 		{Name: "gateway_github_secondary_rate_limit_total", Kind: KindCounter, Labels: []string{"installation_id"},
@@ -117,6 +169,15 @@ func Catalog() []Def {
 			Help: "Dispatches by correlation armament: what we armed, not what resolved."},
 		{Name: "gateway_run_link_total", Kind: KindCounter, Labels: []string{"resolution", "resolution_source"},
 			Help: "run_link events by reliability and by the tier that produced them."},
+
+		// Emitted from internal/forge/resolver.go, and its absence from this
+		// catalog once made Drift() blame the code for a name the table blesses.
+		// Read it as a rate and never as an alarm: the reference lists four states it
+		// cannot tell apart, and a healthy tier-1 deployment leaves it at zero
+		// because tier 2 is never reached.
+		{Name: "gateway_run_name_absent_total", Kind: KindCounter, Labels: []string{"repo", "workflow"},
+			Help: "Correlation tier 2 reached its horizon with a candidate run on the ref, and no candidate carried the injected id."},
+
 		{Name: "gateway_correlation_sweep_error_total", Kind: KindCounter,
 			Help: "Resolver sweeps that ended in error (correlation tier 3). Unlabelled by design."},
 		{Name: "gateway_github_dispatch_total", Kind: KindCounter, Labels: []string{"repo", "workflow", "outcome"},
@@ -127,14 +188,6 @@ func Catalog() []Def {
 			Help: "github.max_queue_wait exceeded, split by lane so a slow caller and a saturated background are distinguishable."},
 		{Name: "gateway_github_token_refresh_failed_total", Kind: KindCounter, Labels: []string{"repo"},
 			Help: "Installation token renewal failed while the old token was still valid — a degradation that looks like success."},
-
-		// Not in the metrics table. The design REQUIRES a per-IP breakdown
-		// for observability.watch_ips but names no metric, so this name is
-		// this package's and is reported as a gap in the table. It is emitted only for
-		// IPs on the configured watch list, so its cardinality is bounded by
-		// configuration exactly as the other exceptions are.
-		{Name: "gateway_watched_ip_rejected_total", Kind: KindCounter, Labels: []string{"ip", "reason"},
-			Help: "Pre-auth rejections from an IP on observability.watch_ips."},
 	}
 }
 
@@ -185,10 +238,16 @@ func New() *Registry {
 		m := &metric{def: d, series: make(map[string]*series)}
 		r.metrics[d.Name] = m
 		r.order = append(r.order, d.Name)
-		if len(d.Labels) == 0 && d.Kind == KindCounter {
+		if len(d.Labels) == 0 && d.Kind == KindCounter && !d.NotEmitted {
 			// A counter that has never fired must still be exported as 0.
 			// Absence and zero are different facts and a dashboard cannot
 			// tell them apart from a missing series.
+			//
+			// NotEmitted is the one exception, and it is not an oversight: a
+			// row the catalog marks "declared, not emitted yet" must not be put on
+			// the wire by the act of transcribing it. Write() skips a metric
+			// with no series, so the row stays in the catalog and off /metrics
+			// until a call site starts recording it.
 			m.series[""] = &series{present: true}
 		}
 	}
@@ -197,6 +256,17 @@ func New() *Registry {
 
 // SetWatchIPs installs observability.watch_ips. Only these addresses ever
 // reach a label.
+//
+// The strings are taken as given and compared with exact equality — the rule
+// says "verbatim". That is only correct because internal/config
+// canonicalises every entry at load, into the same form internal/httpapi's
+// clientIP produces for the observed address. There is deliberately no second
+// normaliser here: one address spelled two ways would then match in this
+// package and not in the event record, which is a worse bug than the one that
+// made this comment necessary.
+//
+// Consequence for callers: a Registry fed a raw config entry rather than a
+// config.Load'ed one silently watches nothing.
 func (r *Registry) SetWatchIPs(ips []string) {
 	set := make(map[string]struct{}, len(ips))
 	for _, ip := range ips {
@@ -315,6 +385,14 @@ func (r *Registry) lockedMetric(name string, kind Kind, labels map[string]string
 	}
 	if m.def.Kind != kind {
 		r.driftf(name, fmt.Sprintf("recorded as %s, declared %s", kind, m.def.Kind))
+	}
+	if m.def.NotEmitted {
+		// The catalog marks this row "declared, not emitted yet" and a call site
+		// just recorded it. The code overtook the table; that is the same
+		// class of disagreement as an undeclared name and belongs in the same
+		// place. gateway_watched_ip_rejected_total went stale exactly this way
+		// and nothing said so.
+		r.driftf(name, "declared not-emitted (†) in the catalog, but recorded")
 	}
 	r.checkLabels(m, labels)
 

@@ -52,9 +52,33 @@ const (
 	// Caller-visible as 503 backend_unreachable.
 	KindUnreachable Kind = "backend_unreachable"
 
-	// KindInstallationNotFound means the App is not installed on the target
-	// repo. Caller-visible as 503 installation_not_found.
+	// KindInstallationNotFound means GET /repos/{o}/{r}/installation found no
+	// installation for the target repo. Caller-visible as 503
+	// installation_not_found.
+	//
+	// It states what the lookup FAILED TO FIND, not why. GitHub answers a bare
+	// 404 "Not Found" for an App that is not installed on the repo, for a repo
+	// that does not exist, and for a repo the App cannot see; those three are
+	// not separable from this response. The one 404 that IS separable — the App
+	// itself not existing — is KindAppNotFound and is not folded in here.
 	KindInstallationNotFound Kind = "installation_not_found"
+
+	// KindAppNotFound means GitHub says the App named by github.app_id does
+	// not exist at all: 404 with the body "Integration not found", measured on
+	// live api.github.com 2026-08-22.
+	//
+	// It is a SEPARATE Kind from KindInstallationNotFound because the two have
+	// different operator remedies and the wrong one is unactionable: no amount
+	// of installing an App fixes an app_id that names no App. It is not a
+	// transient upstream condition — the dispatch definitively did not happen —
+	// and it is not Cacheable, because fixing the config must let the caller's
+	// idempotency key succeed on retry.
+	//
+	// The HTTP layer (internal/httpapi) maps it to 503 backend_unreachable:
+	// the gateway's own identity is unusable, so it does not assert an
+	// upstream fault it has not established.
+	KindAppNotFound Kind = "app_not_found"
+
 	// KindCredentialExpired means the installation token expired and could not
 	// be renewed. Caller-visible as 503 credential_expired.
 	KindCredentialExpired Kind = "credential_expired"
@@ -139,6 +163,7 @@ var (
 	ErrQuotaPaused        = &Error{Kind: KindQuotaPaused}
 	ErrCredentialExpired  = &Error{Kind: KindCredentialExpired}
 	ErrInstallationAbsent = &Error{Kind: KindInstallationNotFound}
+	ErrAppNotFound        = &Error{Kind: KindAppNotFound}
 	ErrReservedInputKey   = &Error{Kind: KindReservedInputKey}
 )
 

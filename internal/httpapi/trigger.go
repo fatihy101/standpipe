@@ -62,6 +62,17 @@ type reqCtx struct {
 	// Until then repo and workflow are caller-chosen strings, and putting
 	// them in a metric label would make its cardinality unbounded.
 	labelled bool
+
+	// reasonText is the request body's `reason` once it has been ADMITTED for
+	// a trigger_rejected row. It is set once, immediately after step 8
+	// allows the request, and stays empty for a value that would not have
+	// survived the gates a persisted reason survives on the success path.
+	// See admitReason.
+	//
+	// It lives on reqCtx rather than in reject()'s signature for the same
+	// reason `labelled` does: a per-call-site argument is a per-call-site
+	// chance to forget, and there are eight reject sites.
+	reasonText string
 }
 
 // handleTrigger is the trigger request-processing order, step by step.
@@ -180,6 +191,31 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	// do not consume the global limit. Every other outcome —
 	// including a rejection — keeps it, because the work was really done.
 
+	// The caller's `reason` becomes admissible for a trigger_rejected
+	// row HERE, and this one assignment covers every reject site below —
+	// steps 9 and 10, the Idempotency-Key check, and steps 11 to 13.
+	//
+	// It reads the body the way peekRef does, and it deliberately does NOT
+	// wait for step 11. The rejections a human resolves by making a policy
+	// decision are caller_policy and not_in_allowlist, and the caller's own
+	// account of what it was trying to do is the input to that decision;
+	// those were exactly the rows that came out blank. Admitting it earlier
+	// does not weaken the gate, because admitReason tests WHICH TWO CHECKS
+	// the value cleared, never when they ran: the body's field rules and the
+	// credential scan are both applied here, on the same value, whatever step
+	// the request goes on to die at.
+	//
+	// Placement, precisely: after step 8 has ALLOWED the request, not before
+	// it. A rate_limited row carries no reason_text by construction —
+	// rejectLogger.Coalesce clears the field, because one row standing for N
+	// requests has no honest single reason — so nothing is lost by not
+	// computing one for a request we are shedding, and the whole point of rate
+	// limiting is that the shed path stays cheap. admitReason runs the entropy scan
+	// over up to 4 KB and can emit a WARN; doing that per shed request would
+	// turn the limiter into a log amplifier, which is the same shape of
+	// mistake coalescing exists to prevent one layer down.
+	t.reasonText = t.admitReason(peekReason(raw))
+
 	// ---- step 9: caller policy -> 403
 	if !authorizeCaller(caller, t.repo, t.workflow, t.ref) {
 		t.reject(errForbidden(DetailCallerPolicy), store.RejectCallerPolicy)
@@ -221,6 +257,16 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ---- step 11: body validation -> 400
+	// t.reasonText is NOT re-derived from body.Reason here. It was admitted
+	// above from the same bytes, and re-running the gate would emit a second
+	// WARN for one refused value.
+	//
+	// The two sources agree on every body that matters. Where they differ,
+	// peekReason is the conservative one: a body with a duplicate or
+	// ill-typed `reason` makes json.Unmarshal fail and peekReason returns "",
+	// whereas encoding/json keeps decoding after saving the first error, so
+	// body.Reason can still hold a partially-decoded value from a body that
+	// was rejected. Empty is the right side of that to be on.
 	body, inputs, err := validateBody(raw)
 	if err != nil {
 		t.reject(errBadRequest(err.Error()), store.RejectBadRequest)
@@ -270,7 +316,12 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		// against a backend that is fine.
 		var fe *forge.Error
 		if errors.As(err, &fe) {
-			t.finish(upstreamError(err), store.OutcomeError)
+			// Only the FAILURE is reported to github_reachable. A successful
+			// Plan may have been answered entirely from the workflow cache
+			// without touching GitHub, and recording that as a contact would
+			// invent the evidence the field exists to carry.
+			s.NoteGitHubCall(err)
+			t.finish(upstreamError(err, t.repo), store.OutcomeError)
 		} else {
 			t.finish(storageError(err), store.OutcomeError)
 		}
@@ -472,6 +523,11 @@ func (t *reqCtx) dispatch(eventID, idempotencyKey string, dreq forge.DispatchReq
 
 	result, dispatchErr := s.forge.Dispatch(ctx, dreq, plan)
 
+	// The health signal github_reachable. A dispatch is unambiguously an attempted
+	// GitHub call, so both outcomes are evidence; a queue-wait rejection never
+	// left the process and evidenceOf discards it.
+	s.NoteGitHubCall(dispatchErr)
+
 	now := s.now()
 	complete := store.CompleteRequest{
 		CallerName:     t.caller.Name,
@@ -494,7 +550,19 @@ func (t *reqCtx) dispatch(eventID, idempotencyKey string, dreq forge.DispatchReq
 		if !errors.As(dispatchErr, &fe) {
 			fe = &forge.Error{Kind: forge.KindUnknown, Err: dispatchErr}
 		}
-		apiResp = upstreamError(dispatchErr)
+		apiResp = upstreamError(dispatchErr, t.repo)
+
+		// The caller's `detail` is a fixed constant and asserts no cause.
+		// forge's own message is where the cause lives — for app_not_found it
+		// names github.app_id and says installing an App cannot fix it, and
+		// for installation_not_found it lists the candidates it could NOT
+		// separate — and the event log only keeps the Kind. Without this line
+		// that text is discarded, and the operator is left with a constant
+		// they have to go and look up.
+		s.log.Warn("dispatch failed upstream",
+			"err", dispatchErr, "kind", string(fe.Kind), "upstream_status", fe.UpstreamStatus,
+			"repo", t.repo, "workflow", t.workflow,
+			"event_id", eventID, "request_id", t.requestID)
 
 		// Success is decided by the ERROR, never by a numeric HTTP status. Cacheable() is forge's own "GitHub definitively refused
 		// this and a retry changes nothing"; LeavesUnknown() is "the dispatch
@@ -667,6 +735,7 @@ func (t *reqCtx) reject(e apiError, reason store.RejectReason) {
 		TargetRef:       t.ref,
 		RejectReason:    reason,
 		HTTPStatus:      e.Status,
+		ReasonText:      t.reasonText,
 		RequestID:       t.requestID,
 	}
 	if reason == store.RejectRateLimited {
@@ -679,6 +748,60 @@ func (t *reqCtx) reject(e apiError, reason store.RejectReason) {
 	}
 
 	t.finish(e, store.OutcomeRejected)
+}
+
+// admitReason decides whether the caller's `reason` may be written to a
+// trigger_rejected row.
+//
+// The test is PARITY WITH THE SUCCESS PATH, not availability. A `reason`
+// reaches trigger_events.reason_text on a `trigger` row only after clearing
+// two gates: the body's field rules (step 11) and the credential scan
+// (step 13). A rejected row is written from paths where neither gate has run
+// yet (steps 9 and 10, and the Idempotency-Key check), where only the first
+// has (steps 11-12), or where the second has run and FAILED (step 13), so
+// both gates are applied here instead. The invariant is then statable in one
+// line: a value that would not have been persisted had the request succeeded
+// is not persisted because it failed.
+//
+// Which is why it is called BEFORE either of those two steps rather than at
+// one of them. The test is which two checks the value cleared, not when they
+// ran, so running it immediately after step 8 allows the request admits
+// exactly the class of value a successful request would have persisted — and
+// it is the pre-body rejections, caller_policy and not_in_allowlist, that most
+// need the caller's own account of its intent.
+//
+// Without the second gate this change would create the one thing it was
+// supposed to avoid — a brand new exposure class. `secret_detected` is the
+// rejection whose whole content is "this request carried something that looks
+// like a credential"; carrying its `reason` onto the row would durably store
+// the suspected credential on the one path that exists to refuse it, while
+// the secret scan is still carefully keeping the value out of the response
+// and the log.
+//
+// The gate changes what is STORED and never what is REJECTED. The secret 400 is
+// still decided by scanSecrets at step 13, over the same inputs, unchanged.
+func (t *reqCtx) admitReason(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	var cause string
+	switch {
+	case validateReason(reason) != nil:
+		// Reachable only when validateBody itself failed: over 1024 runes, or
+		// not UTF-8. Truncating or repairing it would put a value in the
+		// column that no caller ever sent.
+		cause = "malformed"
+	case looksLikeCredential(reason):
+		cause = "resembles a credential"
+	default:
+		return reason
+	}
+	// A field that was dropped says so. The VALUE is never
+	// logged — publishing the credential is the thing the secret scan exists to prevent,
+	// and a log line is not a safer place for it than a column.
+	t.s.log.Warn("reason not recorded on trigger_rejected row",
+		"cause", cause, "caller_name", t.caller.Name, "request_id", t.requestID)
+	return ""
 }
 
 // observe records the request-level metrics.
@@ -725,6 +848,23 @@ func peekRef(raw []byte) string {
 		return ""
 	}
 	return probe.Ref
+}
+
+// peekReason extracts `reason` from a syntactically valid body without
+// validating it, exactly as peekRef does for `ref`.
+//
+// Reading it is not admitting it: every caller of this function passes the
+// result through reqCtx.admitReason, which applies the body's field rules and
+// the credential scan before the value can reach a column. A non-string
+// `reason` yields "" here and an honest 400 at step 11.
+func peekReason(raw []byte) string {
+	var probe struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return ""
+	}
+	return probe.Reason
 }
 
 // defaultBranchOf reads the default branch from the persistent workflow cache

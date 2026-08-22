@@ -34,11 +34,41 @@ const (
 	permissionContents = "read"  // reading workflow files for inputs_def
 )
 
-// appJWTLifetime is deliberately under GitHub's 10-minute ceiling.
+// appJWTLifetime is deliberately under GitHub's ceiling, which was bisected on
+// live api.github.com on 2026-08-22 and sits at exactly now+600s: exp = now+600
+// is accepted, exp = now+660 answers 401 "'Expiration time' claim ('exp') is
+// too far in the future". The 60s that 9 minutes leaves under it is the whole
+// forward-clock-drift budget — see appJWTBackdate.
 const appJWTLifetime = 9 * time.Minute
 
-// appJWTBackdate absorbs small clock drift. The gateway requires NTP with at
-// most 2s drift; 60s is the conventional margin GitHub's own docs suggest.
+// appJWTBackdate sets `iat` 60s in the past. It does NOT buy drift margin, and
+// the comment that used to stand here credited it with margin that comes from
+// somewhere else.
+//
+// Measured on live api.github.com 2026-08-22: GitHub
+// validates `exp` and `iat` against ITS OWN clock, not against each other. A
+// token with iat = now-60 and exp = now+600 — a 660-second span — is accepted.
+// So the backdate spends none of appJWTLifetime's margin, and it does not widen
+// the tolerated drift either. For a gateway clock D AHEAD of GitHub's, `exp`
+// binds first and alone:
+//
+//	exp: appJWTLifetime + D <= 600s          -> D <= 60s
+//	iat: D - appJWTBackdate <= ~61s          -> D <= ~121s
+//
+// Without the backdate the `iat` line would read D <= ~61s, still not the
+// binding one. What the backdate actually buys is insurance against GitHub
+// tightening `iat` back to zero forward tolerance, which is the case its own
+// docs still recommend backdating for. A clock running SLOW is tolerated to
+// roughly appJWTLifetime, since exp then lands in the past.
+//
+// State the size of that budget rather than leaving it to be rediscovered: 60s
+// of forward-drift headroom is THIRTY TIMES the 2s clock-sync (NTP) requirement
+// the gateway places on its host.
+// The gap is not slack to spend — it is the distance between what we require of
+// an operator's clock and where GitHub starts refusing us, and it is what makes
+// a clock-sync violation show up as drift to be fixed rather than as an outage.
+// Raising appJWTLifetime is what would spend it; appjwt_test.go asserts what
+// remains is positive.
 const appJWTBackdate = 60 * time.Second
 
 // Repo is an owner/name pair.
@@ -228,6 +258,87 @@ func signRS256(key *rsa.PrivateKey, header map[string]string, claims map[string]
 	return signingInput + "." + enc.EncodeToString(sig), nil
 }
 
+// githubAppMissingMessage is the 404 body GitHub returns when the App named by
+// the JWT's `iss` does not exist. Measured on live api.github.com 2026-08-22: a JWT for an
+// unregistered App ID answers 404 {"message":"Integration not found"}, while an
+// App that DOES exist but has no installation on the repo answers 404
+// {"message":"Not Found"}. Same status, same endpoint; only the body differs.
+//
+// Compared case-folded, so it is stored folded.
+const githubAppMissingMessage = "integration not found"
+
+// appIsMissing reports whether a 404 body names the App ITSELF as the thing
+// that was not found.
+//
+// This is a message-string match, and a message-string match is fragile:
+// GitHub can reword a body with no notice and nothing here would fail. It is
+// used anyway, for two reasons.
+//
+// First, the status alone carries no information — matching on it is exactly
+// what produced the defect this replaces, where every 404 became "the App is
+// not installed on this repo" and the most likely first-setup mistake, a typo
+// in github.app_id, was handed the one remedy that cannot fix it.
+//
+// Second, the fragility is arranged so it can only cost PRECISION, never
+// CORRECTNESS:
+//
+//   - recognised   -> the strong, specific claim (app_id names no App).
+//   - unrecognised -> the weak claim, which names the candidates and picks none.
+//
+// If GitHub rewords the body, a wrong app_id degrades from a precise diagnosis
+// to an honest ambiguous one. The old fallback was the confident wrong answer,
+// and that is the shape an operator cannot recover from — it sends them to
+// /settings/installations to look for an App that does not exist.
+//
+// The converse does NOT hold and must not be added: a body of "Not Found" is
+// not evidence that the App exists and is merely uninstalled. GitHub answers
+// the same for a repo that does not exist and for one this App cannot see.
+// That half is genuinely undecidable from this response; notFoundOnAppCall says
+// so instead of guessing.
+//
+// If the message match is ever judged too thin to carry the strong claim, the
+// independent confirmation is App-level: GET /app answers whether this App
+// exists without a repo in scope. It is deliberately NOT called here — it is a
+// second upstream request on every 404, in the App bucket, able to fail on its
+// own, and adding it is a deliberate design choice rather than something to
+// slip in behind a bug fix.
+func appIsMissing(message string) bool {
+	return strings.Contains(strings.ToLower(message), githubAppMissingMessage)
+}
+
+// notFoundOnAppCall converts a 404 taken while authenticating AS THE APP into
+// the most specific error the response body actually supports — and no more.
+//
+// alternatives names the states this particular endpoint's 404 cannot tell
+// apart. It is spoken in the error text rather than one of them being chosen,
+// because a detail that asserts an unestablished cause is worse than a vague
+// one: the vague one leaves the operator looking, the confident wrong one stops
+// them looking.
+func (t *identity) notFoundOnAppCall(repo Repo, e *Error, cause error, alternatives string) *Error {
+	said := ""
+	if e.Message != "" {
+		said = fmt.Sprintf(" (GitHub said %q)", e.Message)
+	}
+	if appIsMissing(e.Message) {
+		return &Error{
+			Kind:           KindAppNotFound,
+			UpstreamStatus: e.UpstreamStatus,
+			Message: fmt.Sprintf(
+				"GitHub App id %d does not exist%s; check github.app_id — installing an App on %s cannot fix this",
+				t.cfg.AppID, said, repo),
+			Err: cause,
+		}
+	}
+	return &Error{
+		Kind:           KindInstallationNotFound,
+		UpstreamStatus: e.UpstreamStatus,
+		Message: fmt.Sprintf(
+			"no installation of app_id %d found for %s%s; %s",
+			t.cfg.AppID, repo, said, alternatives),
+		Err: cause,
+	}
+}
+
 // installationID resolves the installation for a repo. The result is
 // cached for Config.InstallationTTL.
 //
@@ -253,8 +364,11 @@ func (t *identity) installationID(ctx context.Context, repo Repo) (int64, error)
 
 	if err != nil {
 		e := classify(err, resp)
-		// A 404 here means the App is not installed on this repo. That
-		// is a distinct operator-visible state, not a missing workflow.
+		// A 404 here is an identity/installation state, not a missing
+		// workflow, so it does not stay KindWorkflowNotFound. WHICH identity
+		// state it is comes from notFoundOnAppCall reading the body; this
+		// branch no longer decides it from the status, which is how a wrong
+		// github.app_id came to be reported as an uninstalled App.
 		//
 		// THE GAUGE CARRIES NO `workflow` LABEL, AND NOT BECAUSE IT WAS
 		// OVERLOOKED. Do not add one by inventing a value:
@@ -275,13 +389,19 @@ func (t *identity) installationID(ctx context.Context, repo Repo) (int64, error)
 		//     would conflate two operator states that need different actions
 		//     ("install the App" vs "the workflow is gone").
 		if e.Kind == KindWorkflowNotFound {
+			// The gauge stays at 1 for BOTH identity states, and deliberately.
+			// It means "this target is not dispatchable", which is true
+			// whether the App is uninstalled or does not exist; when the App
+			// does not exist every repo pins to 1, which is also true. Its
+			// name carries no cause and the error does — dropping the signal
+			// to avoid a misleading name would silence the alert exactly when
+			// the gateway is most broken. An App-LEVEL gauge would be the
+			// honest addition, and inventing one belongs in the metrics
+			// catalog, not at an emission site.
 			t.metrics.SetGauge("gateway_target_unavailable", 1, map[string]string{"repo": key})
-			return 0, &Error{
-				Kind:           KindInstallationNotFound,
-				UpstreamStatus: e.UpstreamStatus,
-				Message:        fmt.Sprintf("GitHub App is not installed on %s", key),
-				Err:            err,
-			}
+			return 0, t.notFoundOnAppCall(repo, e, err,
+				"the App may not be installed there, or the repo may not exist or "+
+					"may not be visible to it — this 404 does not say which")
 		}
 		return 0, e
 	}
@@ -360,12 +480,13 @@ func (t *identity) token(ctx context.Context, repo Repo) (string, int64, error) 
 		}
 		e := classify(err, resp)
 		if e.Kind == KindWorkflowNotFound {
-			return "", 0, &Error{
-				Kind:           KindInstallationNotFound,
-				UpstreamStatus: e.UpstreamStatus,
-				Message:        fmt.Sprintf("GitHub App is not installed on %s", repo),
-				Err:            err,
-			}
+			// Same body-versus-status rule as installationID. The alternatives
+			// differ: installationID already answered for this repo, so the
+			// installation id existed at least as of the cached lookup and the
+			// interesting cases are removal and App deletion since.
+			return "", 0, t.notFoundOnAppCall(repo, e, err,
+				fmt.Sprintf("installation %d answered for this repo when it was cached, "+
+					"so it may have been removed since — this 404 does not say which", instID))
 		}
 		return "", 0, &Error{Kind: KindCredentialExpired, UpstreamStatus: e.UpstreamStatus, Err: err}
 	}

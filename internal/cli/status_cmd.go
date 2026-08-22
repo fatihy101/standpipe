@@ -112,6 +112,8 @@ type statusReport struct {
 }
 
 type gatewayLine struct {
+	// Reachable is whether THIS command could reach the admin listener. It is
+	// not GitHubReachable and the two are unrelated.
 	Reachable     bool   `json:"reachable"`
 	AdminURL      string `json:"admin_url"`
 	Version       string `json:"version"`
@@ -120,6 +122,12 @@ type gatewayLine struct {
 	SchemaVersion int    `json:"schema_version"`
 	FreeBytes     uint64 `json:"disk_free_bytes"`
 	Unreachable   string `json:"unreachable_reason,omitempty"`
+
+	// The /healthz github fields, carried into `status --json` so the INSTALLATIONS
+	// block's empty case can be explained rather than guessed at.
+	GitHubReachable    bool  `json:"github_reachable"`
+	GitHubLastCallAt   int64 `json:"github_last_call_at,omitempty"`
+	GitHubRateObserved bool  `json:"github_rate_observed"`
 }
 
 type installationLine struct {
@@ -190,8 +198,18 @@ func buildStatus(ctx context.Context, cfg *config.Config, db *store.DB, adminURL
 		rep.Gateway.UptimeSeconds = health.UptimeSeconds
 		rep.Gateway.SQLiteOK = health.SQLiteOK
 		rep.Gateway.SchemaVersion = health.SchemaVersion
+		rep.Gateway.GitHubReachable = health.GitHubReachable
+		rep.Gateway.GitHubLastCallAt = health.GitHubLastCallAt
+		rep.Gateway.GitHubRateObserved = health.GitHubRateObserved
 		if !health.SQLiteOK {
 			rep.Problems = append(rep.Problems, "the gateway reports sqlite_ok: false — quick_check failed, or free space is below storage.min_free_bytes")
+		}
+		if health.GitHubLastCallAt > 0 && !health.GitHubReachable {
+			// A call was attempted and no response came back. THIS is the
+			// direct-call runbook case; the empty-quota case below is not.
+			rep.Problems = append(rep.Problems, fmt.Sprintf(
+				"the last GitHub call (%s ago) got no response — GitHub is unreachable from this host, and dispatch is failing 503 backend_unreachable (see the direct-call runbook)",
+				humanDuration(now.Sub(time.Unix(health.GitHubLastCallAt, 0)))))
 		}
 		rep.Installations = installationsFrom(metricLines, now)
 		for _, inst := range rep.Installations {
@@ -270,11 +288,21 @@ func buildStatus(ctx context.Context, cfg *config.Config, db *store.DB, adminURL
 
 // adminHealthBody is the subset of the /healthz body `status` reads.
 type adminHealthBody struct {
-	Status        string `json:"status"`
-	Version       string `json:"version"`
-	UptimeSeconds int64  `json:"uptime_seconds"`
-	SQLiteOK      bool   `json:"sqlite_ok"`
-	SchemaVersion int    `json:"schema_version"`
+	Status          string `json:"status"`
+	Version         string `json:"version"`
+	UptimeSeconds   int64  `json:"uptime_seconds"`
+	SQLiteOK        bool   `json:"sqlite_ok"`
+	SchemaVersion   int    `json:"schema_version"`
+	GitHubReachable bool   `json:"github_reachable"`
+	// GitHubLastCallAt is 0 when the gateway has classified no GitHub call.
+	// Without it, `github_reachable: false` is unreadable: it would mean
+	// either "GitHub did not answer" or "nothing has been tried".
+	GitHubLastCallAt int64 `json:"github_last_call_at"`
+	// GitHubRateObserved is why the INSTALLATIONS block can be empty while
+	// GitHub is answering: real GitHub sends no X-RateLimit-* on an
+	// authenticated failure, so a wrong App key produces calls, answers, and
+	// no quota series at all.
+	GitHubRateObserved bool `json:"github_rate_observed"`
 }
 
 // fetchAdmin reads the admin /healthz and /metrics.
@@ -578,7 +606,26 @@ func (r *statusReport) print(w io.Writer) {
 	// ---- INSTALLATIONS
 	fmt.Fprintf(w, "INSTALLATIONS\n")
 	if len(r.Installations) == 0 {
-		fmt.Fprintf(w, "  (no quota observed yet — no GitHub call has been made since the gateway started)\n")
+		// This line used to say "no GitHub call has been made since the
+		// gateway started". Measured 2026-08-22: after seven real calls that
+		// GitHub answered and rejected, it still said that — an empty quota
+		// series means no response CARRIED X-RateLimit-* headers, and real
+		// GitHub sends none on an authenticated failure. The two facts are now
+		// reported separately because the operator's next action differs.
+		switch {
+		case !r.Gateway.Reachable:
+			fmt.Fprintf(w, "  (quota not read — the admin listener is not answering)\n")
+		case r.Gateway.GitHubLastCallAt == 0:
+			fmt.Fprintf(w, "  (no quota observed yet — the gateway has made no GitHub call since it started)\n")
+		case r.Gateway.GitHubReachable:
+			fmt.Fprintf(w, "  (no quota observed yet — GitHub ANSWERED %s ago but no response carried X-RateLimit\n",
+				humanDuration(nowFunc().Sub(time.Unix(r.Gateway.GitHubLastCallAt, 0))))
+			fmt.Fprintf(w, "   headers; real GitHub sends none when the App credential is refused — check the App key,\n")
+			fmt.Fprintf(w, "   the app_id and whether the App is installed, NOT the network)\n")
+		default:
+			fmt.Fprintf(w, "  (no quota observed yet — the last GitHub call %s ago got no response at all)\n",
+				humanDuration(nowFunc().Sub(time.Unix(r.Gateway.GitHubLastCallAt, 0))))
+		}
 	}
 	for _, inst := range r.Installations {
 		state := "ok"

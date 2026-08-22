@@ -346,6 +346,14 @@ func (tr *traceResult) print(w io.Writer, history bool) {
 	fmt.Fprintf(w, "  correlation %-18s %s\n",
 		orDash(t.str("correlation")), correlationNote(t.str("correlation")))
 	fmt.Fprintf(w, "  decision    %s (%s)\n", orDash(t.str("decision", "backend")), orDash(t.str("decision", "reason")))
+	// The request body's `reason`. This row type has carried it since the gateway was
+	// written and trace never showed it, while the rejected row — where the
+	// column was unconditionally NULL — did. Shown only when present: on a
+	// `trigger` row an empty value means the caller sent none or `forget`
+	// redacted it, and neither is a question the operator is holding open.
+	if txt := t.str("reason_text"); txt != "" {
+		fmt.Fprintf(w, "  reason_text %s\n", txt)
+	}
 	fmt.Fprintf(w, "  integrity   %s\n", tr.integrityOf(t))
 
 	// --- outcome
@@ -453,13 +461,38 @@ func (tr *traceResult) printRejected(w io.Writer) {
 		}
 		fmt.Fprintf(w, "  suppressed  %d further request(s) coalesced into this row since %s\n", n, since)
 	}
-	if txt := r.str("reason_text"); txt != "" {
-		fmt.Fprintf(w, "  detail      %s\n", txt)
-	}
+	// The request body's `reason` — the CALLER's words, not the gateway's reject_reason
+	// printed two lines up. It was labelled `detail` while the column was
+	// unconditionally NULL, so the collision never had to be read; it does
+	// now. The label is the column name so that trace, `export` and the rejection path all
+	// call this one field by one name.
+	//
+	// Printed even when empty, because on this row type the ABSENCE is itself
+	// the ambiguous datum: see the note below.
+	fmt.Fprintf(w, "  reason_text %s\n", orDash(r.str("reason_text")))
 	fmt.Fprintf(w, "  integrity   %s\n", tr.integrityOf(r))
 	fmt.Fprintf(w, "\n          A trigger_rejected row is parentless and has no outcome, run_link or\n")
 	fmt.Fprintf(w, "          run_observed. It proves the refusal was RECORDED — \"silent dropping is\n")
 	fmt.Fprintf(w, "          FORBIDDEN\" made testable. It does not enter the coverage query.\n")
+	if r.str("reason_text") == "" {
+		fmt.Fprintf(w, "\n          An absent reason_text is NOT proof the caller gave none. It is equally empty\n")
+		fmt.Fprintf(w, "          when `forget` redacted it, and when the value was refused storage by\n")
+		fmt.Fprintf(w, "          the admission rule — for exceeding 1024 characters, or for looking\n")
+		fmt.Fprintf(w, "          like a credential.\n")
+		// The rate_limited case is NOT a fourth meaning of the same
+		// kind. The three above are facts about the VALUE and are read off a
+		// row that could have carried one; this one is a fact about the ROW,
+		// holds for every 429 row there will ever be, and survives a change to
+		// the request processing order. Printed as its own paragraph so an operator does not
+		// read it as the next item in the list.
+		if r.str("reject_reason") == string(store.RejectRateLimited) {
+			fmt.Fprintf(w, "\n          On THIS row none of those three is what is being reported. They are facts\n")
+			fmt.Fprintf(w, "          about the value; a rate_limited row's reason_text is empty ALWAYS, as a fact\n")
+			fmt.Fprintf(w, "          about the row — it stands for suppressed_count requests and their reasons\n")
+			fmt.Fprintf(w, "          cannot be one string. No value was dropped here, and nothing about\n")
+			fmt.Fprintf(w, "          the request processing order can make this row carry one.\n")
+		}
+	}
 }
 
 // json is the --json output.

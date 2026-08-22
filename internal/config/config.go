@@ -45,6 +45,12 @@ const (
 	DefaultMaxDriftSeconds = 2
 )
 
+// MaxWatchIPs is the ceiling on observability.watch_ips. It is
+// not a default — it is a limit, and it is the reason
+// gateway_watched_ip_rejected_total's series count is bounded by the config
+// file rather than by whoever is sending requests.
+const MaxWatchIPs = 32
+
 // Config is the Phase 0 subset of standpipe.yaml.
 type Config struct {
 	Gateway        Gateway           `yaml:"gateway"`

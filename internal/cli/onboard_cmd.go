@@ -85,16 +85,34 @@ func runOnboardCmd(args []string) error {
 	//
 	// Both come from one call. internal/forge exposes no installation lookup
 	// of its own (installationID is unexported), but DiscoverSurface goes
-	// through it and answers KindInstallationNotFound when the App is not
-	// installed — a distinct operator-visible state. The installation ID that
-	// the documented example output prints cannot be shown from here; the need
-	// for an exported lookup is recorded as an internal/forge interface request
-	// rather than worked around by reaching into the package.
+	// through it and answers KindInstallationNotFound or KindAppNotFound —
+	// distinct operator-visible states. The installation ID that the documented
+	// example output prints cannot be shown from here; the need for an exported
+	// lookup is recorded as an internal/forge interface request rather than worked around by
+	// reaching into the package.
 	surface, err := gh.DiscoverSurface(ctx, repo)
 	if err != nil {
-		if forge.KindOf(err) == forge.KindInstallationNotFound {
-			fmt.Printf("✗ %s — the GitHub App (app_id %d) is NOT installed on this repo\n", repo, cfg.GitHub.AppID)
-			fmt.Printf("  → install it, then re-run: https://github.com/settings/installations\n")
+		switch forge.KindOf(err) {
+		case forge.KindAppNotFound:
+			// github.app_id names no App at all (measured 2026-08-22: GitHub
+			// answers 404 "Integration not found"). This branch exists so the
+			// case does not fall through to the generic handler by luck: the
+			// generic one ends by suggesting --workflows, which cannot help,
+			// and the installation branch below would send the operator to
+			// install an App that does not exist.
+			fmt.Printf("✗ %s — %v\n", repo, err)
+			fmt.Printf("  → fix github.app_id in %s; no installation can succeed while the id names no App\n", *cfgPath)
+			fmt.Printf("  → nothing was written to %s\n", *cfgPath)
+			return silentExit(1)
+		case forge.KindInstallationNotFound:
+			// forge's own message is printed instead of a sentence of ours.
+			// This used to assert "the App is NOT installed on this repo",
+			// which is one of THREE causes a bare 404 cannot separate — the
+			// repo may also not exist, or the App may not be able to see it.
+			// Naming one of them is the flattening this slice exists to
+			// remove; forge names all three and picks none.
+			fmt.Printf("✗ %s — %v\n", repo, err)
+			fmt.Printf("  → if the App is simply not installed: https://github.com/settings/installations\n")
 			fmt.Printf("  → nothing was written to %s\n", *cfgPath)
 			return silentExit(1)
 		}

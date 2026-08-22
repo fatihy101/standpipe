@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// routing.json's parser lives here, in package main, and that placement is
+// routing.json's parser lives here, in internal/cli, and that placement is
 // the implementation of the file's central rule: the gateway does not read
 // this file. The consumer is the CALLER, reading a local clone during an
 // outage (the direct-call runbook) — independent readability is the entire
@@ -18,14 +18,39 @@ import (
 // direct-call path depend on the thing that is down.
 //
 // Stating that as a rule protects nothing; a later slice adds one import and
-// the rule is gone with no symptom. So the parser is in package main instead:
-// internal/httpapi, internal/forge and internal/store CANNOT import it, because
-// Go forbids importing a main package. The request path cannot read
-// routing.json even by mistake. That is a compiler-enforced boundary rather
-// than a convention.
+// the rule is gone with no symptom. So the placement is what enforces it:
+// internal/cli imports all six library packages — httpapi, forge, store,
+// config, metrics and adapter — so none of them can import internal/cli back.
+// That would be an import cycle, and the compiler refuses it. The request path
+// cannot read routing.json even by mistake.
 //
-// The corollary is that this file must stay free of anything the gateway
-// needs, or somebody will be tempted to move it into internal/.
+// READ THE MECHANISM CAREFULLY, IT IS WEAKER THAN IT USED TO BE. Until the
+// Standpipe rename (2026-08-21) this parser was cmd/standby/routing.go in
+// package main, and the enforcement was that Go forbids importing a main
+// package at all. That was STRUCTURAL: no arrangement of the library packages
+// could have reached it. What holds today is only ACYCLICITY, and acyclicity is
+// CONTINGENT on internal/cli remaining the package that imports the gateway
+// packages. Split internal/cli so that a routing-only package imports nothing,
+// or move the parser to a package the gateway can reach, and the cycle — and
+// with it the guarantee — is gone. The conclusion survived the rename; the
+// reason did not, and a reader who checks the old reason, finds it false, and
+// concludes the boundary is gone is one step from a violation that compiles.
+//
+// That violation is not hypothetical. Moving LoadRouting into internal/config —
+// the plausible "config parsing belongs in config" refactor — builds and vets
+// clean, and every gateway package silently gains the ability the documents say
+// it does not have.
+//
+// internal/cli/routing_boundary_test.go is what makes the claim checkable. It
+// parses the module's own import graph, finds the parser's package by following
+// LoadRouting/RoutingFile rather than by naming internal/cli, and fails when any
+// non-main package can reach it. It is the only thing that catches the move
+// described above. If that test is deleted or re-pointed at a hardcoded package,
+// this comment is back to being a convention.
+//
+// The corollary that keeps this true: this file must stay free of anything the
+// gateway needs, or somebody will be tempted to move it into a package the
+// gateway imports.
 
 // routingSchemaVersion is the file's `schema_version`. It becomes 2 in Phase 2 when
 // `overrides` gains routing semantics; in Phase 0 anything else is a refusal,

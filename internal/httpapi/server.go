@@ -64,6 +64,10 @@ type Server struct {
 	callerLim atomic.Pointer[callerLimiters]
 	rejects   *rejectLogger
 
+	// github is the health body's github_reachable. See githubcontact.go for why it is
+	// not the rate limiter's observations.
+	github githubContact
+
 	startedAt time.Time
 }
 
@@ -229,14 +233,31 @@ func (s *Server) handlePublicHealth(w http.ResponseWriter, r *http.Request) {
 
 // adminHealth is the admin /healthz's detailed body.
 type adminHealth struct {
-	Status             string   `json:"status"`
-	Version            string   `json:"version"`
-	UptimeSeconds      int64    `json:"uptime_seconds"`
-	SQLiteOK           bool     `json:"sqlite_ok"`
-	SchemaVersion      int      `json:"schema_version"`
-	GitHubReachable    bool     `json:"github_reachable"`
-	GitHubRateRemain   int      `json:"github_rate_remaining"`
-	GitHubRateResetAt  int64    `json:"github_rate_reset_at"`
+	Status        string `json:"status"`
+	Version       string `json:"version"`
+	UptimeSeconds int64  `json:"uptime_seconds"`
+	SQLiteOK      bool   `json:"sqlite_ok"`
+	SchemaVersion int    `json:"schema_version"`
+
+	// GitHubReachable: the most recent GitHub call this gateway classified
+	// produced an HTTP RESPONSE from GitHub. It says nothing about whether the
+	// response was a success — a 401 on a wrong App key is a reachable GitHub,
+	// and that is the point of the field (githubcontact.go).
+	GitHubReachable bool `json:"github_reachable"`
+	// GitHubLastCallAt is when that verdict was formed. ABSENT means no
+	// GitHub call has been classified since the gateway started, which is the
+	// only reading under which `github_reachable: false` does not mean GitHub
+	// failed to answer. A bool alone cannot carry three states.
+	GitHubLastCallAt int64 `json:"github_last_call_at,omitempty"`
+	// GitHubRateObserved is whether any response has carried X-RateLimit-*
+	// headers. This is what `github_reachable` used to be derived from, kept
+	// as its own field because it is a real fact — it is the precondition for
+	// the two numbers below, and real GitHub omits those headers on every
+	// authenticated failure.
+	GitHubRateObserved bool  `json:"github_rate_observed"`
+	GitHubRateRemain   int   `json:"github_rate_remaining"`
+	GitHubRateResetAt  int64 `json:"github_rate_reset_at"`
+
 	PreAuthLimiterSize int      `json:"pre_auth_limiter_entries"`
 	RejectWindowsOpen  int      `json:"reject_windows_open"`
 	MetricsDrift       []string `json:"metrics_drift,omitempty"`
@@ -270,15 +291,36 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 		h.Status = "degraded"
 	}
 
+	// The quota fold. `h.GitHubRateRemain == 0` used to be the "unset"
+	// sentinel here, so a bucket sitting at exactly 0 remaining could never
+	// stick — the field went wrong at precisely the moment it mattered. The
+	// sentinel is now a separate flag.
+	lastCallAt, reachable := s.github.snapshot()
 	for _, snap := range s.forge.RateSnapshots() {
 		if snap.ObservedAt.IsZero() {
 			continue
 		}
-		h.GitHubReachable = true
-		if h.GitHubRateRemain == 0 || snap.Remaining < h.GitHubRateRemain {
-			h.GitHubRateRemain = snap.Remaining
-			h.GitHubRateResetAt = snap.Reset.Unix()
+		// A response that carried quota headers is itself proof GitHub
+		// answered. It is folded in by TIME rather than assumed newer: the
+		// resolver sweep calls GitHub without going through NoteGitHubCall,
+		// so its observations are the only trace some deployments have.
+		if snap.ObservedAt.After(lastCallAt) {
+			lastCallAt, reachable = snap.ObservedAt, true
 		}
+		if !h.GitHubRateObserved || snap.Remaining < h.GitHubRateRemain {
+			h.GitHubRateObserved = true
+			h.GitHubRateRemain = snap.Remaining
+			// Reset belongs to the bucket that won the minimum, and a zero
+			// time is left as 0 rather than published as Unix()'s year 1.
+			h.GitHubRateResetAt = 0
+			if !snap.Reset.IsZero() {
+				h.GitHubRateResetAt = snap.Reset.Unix()
+			}
+		}
+	}
+	h.GitHubReachable = reachable
+	if !lastCallAt.IsZero() {
+		h.GitHubLastCallAt = lastCallAt.Unix()
 	}
 
 	status := http.StatusOK
@@ -325,7 +367,12 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 //
 // routing.json is NOT consulted here. Its validation belongs to the
 // `standpipe inventory` CLI, and the gateway process never reads the file at
-// all: the parser lives in package main, which internal/httpapi cannot import.
+// all: the parser lives in internal/cli, which imports this package, so
+// internal/httpapi importing it back would be an import cycle. That is a
+// compile error rather than a convention — but note it is weaker than it reads.
+// It holds only while internal/cli is the package that imports the gateway
+// packages; moving the parser somewhere internal/httpapi can reach compiles
+// fine. internal/cli/routing_boundary_test.go is what catches that.
 func (s *Server) Inventory(ctx context.Context, historyDays int) (*InventoryReport, error) {
 	return BuildInventory(ctx, s.store, historyDays, s.now())
 }

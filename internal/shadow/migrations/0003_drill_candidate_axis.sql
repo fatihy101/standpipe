@@ -60,6 +60,17 @@
 --
 -- Read with candidate.go (the writer), audit.go (the six candidate audits) and
 -- retention.go.
+--
+-- THE RULE TABLE. Every rule this file holds is listed in DrillRules()
+-- (drillrules.go), each naming the constraint, trigger or index that holds it;
+-- docs/reference/drill-rules.md is generated from it. The table replaced the
+-- design's proposed DDL on 2026-08-23, and the divergences a–e above are why.
+--
+-- THE NAMES BELOW ARE THE INTERFACE, not decoration. A CHECK that loses its
+-- name cannot appear in a table of names and cannot be grepped for, and
+-- internal/shadow/ruletable_test.go fails on both — on a name this file has
+-- that the rule table does not, and on a name the rule table has that this
+-- file does not.
 
 -- ---------------------------------------------------------------------------
 -- THE INTERPRETATION OF THE DAY KEY

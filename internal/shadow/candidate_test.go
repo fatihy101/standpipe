@@ -12,12 +12,14 @@ import (
 	"github.com/fatihy101/standpipe/internal/exec"
 )
 
-// The candidate axis's eleven assertions, its six audits and the "never read
-// the gate through the join" measurement, retained as tests.
+// The candidate axis's rules, its six audits and the "never read the gate
+// through the join" measurement, retained as tests.
 //
-// The design says the DDL was driven — each assertion with the row that must
-// PASS and the row that must FAIL. That drive lived in one transcript. This
-// file is where it re-runs.
+// The candidate axis is no longer specified as a DDL fence: it has a thirty-row
+// rule table, each row naming the shipped constraint that holds it, driven against the schema
+// the MIGRATIONS build rather than against a clean copy of a design document. That
+// drive lived in one transcript. This file re-runs the part of it that reads
+// as behaviour a caller can see.
 
 const candDay = "2026-05-01"
 
@@ -141,7 +143,13 @@ func TestCandidateRowConstraints(t *testing.T) {
 			why:    "the disposition and the column say opposite things",
 		},
 		{
-			name:   "a conclusion outside GitHub's eight is refused",
+			// The name carries NO SIZE. It said "GitHub's eight" and stayed
+			// saying it after `startup_failure` made the set nine — because the set is
+			// exec.RunConclusions(), which internal/exec widens, and a number
+			// written down here is a copy of a map maintained in another
+			// package. internal/exec/vocabulary.go took the same decision for
+			// its operator-facing messages after the identical drift.
+			name:   "a conclusion outside GitHub's own set is refused",
 			spec:   candSpec{id: "p6", runID: 16},
 			mutate: func(c *Candidate) { c.GitHubConclusion = exec.ConclusionUnmappable },
 			why:    "`unmappable` is OUR word for a conclusion we could not map; GitHub never writes it",

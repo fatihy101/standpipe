@@ -210,14 +210,44 @@ type GitHub struct {
 	dispatches     []DispatchRecord
 	fails          map[Operation]*failure
 	calls          map[Operation]int
-	rateRemaining  int
-	rateLimit      int
+	// auth is the Authorization header of every request that reached each
+	// operation, oldest first. The fake does NOT verify it — see
+	// Authorizations for why the check lives in a test instead.
+	auth          map[Operation][]string
+	rateRemaining int
+	rateLimit     int
 	// runNameTemplate builds the run-name a dispatch's run carries. It mirrors
 	// the setup guide's suggested `run-name: "<workflow> • ${{ inputs.standby_trigger_id }}"`.
 	runNameTemplate func(workflow, triggerID string) string
 	// runNameApplied is whether GitHub applies that run-name to the runs
 	// subsequent dispatches create. True by default — see SetRunNameApplied.
 	runNameApplied bool
+}
+
+// headBranchOf is what GitHub reports as a run's `head_branch` for a dispatch
+// on ref: the SHORT name, for a tag exactly as for a branch.
+//
+// MEASURED 2026-08-24, read-only against api.github.com with no credentials:
+// tag-triggered runs in goreleaser/goreleaser and helm/helm report
+// head_branch "v2.18.0" and "v3.21.4" — the bare tag, never "refs/tags/...".
+//
+// This function used to strip only "refs/heads/", so a dispatch on
+// refs/tags/v0.1 produced head_branch "refs/tags/v0.1", a value GitHub does
+// not emit. It mattered in one direction that does not show up as a test
+// failure: store.NormalizeRef and forge.BranchRef both pass a value that
+// already starts with "refs/" straight through, so the fake's tag runs got a
+// correctly-tagged head_branch_normalized, while a REAL tag run gets
+// "refs/heads/v0.1" — branch-only by construction, as BranchRef's own comment
+// says. A fake that hands the normaliser an already-correct answer can never
+// exercise the case the normaliser documents as ambiguous.
+func headBranchOf(ref string) string {
+	if rest, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+		return rest
+	}
+	if rest, ok := strings.CutPrefix(ref, "refs/tags/"); ok {
+		return rest
+	}
+	return ref
 }
 
 // workflowNameOf is the `name:` of the workflow a run belongs to, derived the
@@ -240,6 +270,7 @@ func NewGitHub() *GitHub {
 		repos:          make(map[string]*fakeRepo),
 		fails:          make(map[Operation]*failure),
 		calls:          make(map[Operation]int),
+		auth:           make(map[Operation][]string),
 		rateRemaining:  4999,
 		rateLimit:      5000,
 		// GitHub applying a declared run-name is the normal case, so it is
@@ -348,6 +379,17 @@ func (g *GitHub) AddRepo(repo, defaultBranch string, installationID int64) {
 // AddWorkflow registers a workflow file and returns its numeric id. content is
 // the YAML the contents endpoint serves; an empty string still yields a
 // workflow whose file cannot be parsed, i.e. a COLD cache entry.
+//
+// KNOWN SIMPLIFICATION: the workflow's `name` — what the workflows listing
+// publishes and what a run falls back to in `name` when no run-name applies —
+// is derived from the FILE NAME and not from the content's own `name:` key.
+// Real GitHub publishes the declared name. The consequence is that the
+// 2026-08-21 probe rig, whose workflow declares `name: probe-workflow-name` in
+// probe.yml precisely so the two strings are distinguishable, cannot be
+// reproduced here: this fake would call it "probe". Nothing in the gateway
+// compares the workflow name (tier 2 searches for the trigger id as a
+// substring of the run-name fields), which is why the simplification stands;
+// TestFakeKnownDivergencesFromMeasuredGitHub pins it so it stays a decision.
 func (g *GitHub) AddWorkflow(repo, file, content string) int64 {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -417,6 +459,29 @@ func (g *GitHub) Calls(op Operation) int {
 	return g.calls[op]
 }
 
+// Authorizations returns the Authorization header of every request that
+// reached op, oldest first. An entry is "" when the request carried none.
+//
+// THE FAKE DOES NOT VERIFY THE HEADER, AND THAT IS ON PURPOSE. Real GitHub
+// distinguishes two credential CLASSES on these endpoints — the App JWT for
+// `GET /repos/{o}/{r}/installation` and `POST /app/installations/{id}/
+// access_tokens`, the installation token for everything else — and answers 401
+// when they are swapped. A fake that enforced it would turn a credential-class
+// mistake into a generic upstream failure in every test that touches GitHub,
+// which is the loud-in-the-wrong-place failure this file's rule 3 is about.
+// Instead the header is RECORDED and the check lives where it can name the
+// endpoint and the class: internal/forge/credentials_test.go.
+//
+// Until this existed nothing in the suite read the header at all, so every
+// test passed with a completely broken JWT minter.
+func (g *GitHub) Authorizations(op Operation) []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make([]string, len(g.auth[op]))
+	copy(out, g.auth[op])
+	return out
+}
+
 // Dispatches returns every dispatch the fake accepted, oldest first.
 func (g *GitHub) Dispatches() []DispatchRecord {
 	g.mu.Lock()
@@ -456,6 +521,8 @@ func (g *GitHub) SetConclusion(runID int64, conclusion string) {
 func (g *GitHub) intercept(w http.ResponseWriter, r *http.Request, op Operation) bool {
 	g.mu.Lock()
 	g.calls[op]++
+	// Recorded, never enforced. See Authorizations.
+	g.auth[op] = append(g.auth[op], r.Header.Get("Authorization"))
 	f := g.fails[op]
 	var mode FailMode
 	if f != nil {
@@ -723,7 +790,7 @@ func (g *GitHub) handleDispatch(w http.ResponseWriter, r *http.Request) {
 		WorkflowID: wf.id,
 		Path:       wf.path,
 		Event:      "workflow_dispatch",
-		HeadBranch: strings.TrimPrefix(body.Ref, "refs/heads/"),
+		HeadBranch: headBranchOf(body.Ref),
 		RunName:    g.runNameTemplate(wf.name, triggerID),
 		// SetRunNameApplied(false): the template ran and GitHub published it
 		// in neither field.

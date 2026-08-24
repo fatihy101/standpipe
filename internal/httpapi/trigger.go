@@ -71,7 +71,14 @@ type reqCtx struct {
 	//
 	// It lives on reqCtx rather than in reject()'s signature for the same
 	// reason `labelled` does: a per-call-site argument is a per-call-site
-	// chance to forget, and there are eight reject sites.
+	// chance to forget, and EVERY trigger_rejected row — steps 8 to 13,
+	// which is every rejection that gets a row at all — leaves through one of
+	// those call sites. (Steps 1-7 reject before authn and are counter-only;
+	// step 14 onwards fails through finish(), which is not a rejection.)
+	//
+	// That bound is stated structurally rather than as a number on purpose:
+	// this comment said "eight reject sites" when there were twelve, and a
+	// count that UNDERSELLS its own argument is still a count nobody checked.
 	reasonText string
 }
 

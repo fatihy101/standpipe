@@ -294,7 +294,7 @@ func (r *Result) Finalise(verdict Outcome, reason RefusalReason, conclusion Conc
 	switch verdict {
 	case OutcomeCompleted:
 		if !conclusion.IsGitHub() {
-			return fmt.Errorf("exec: completed needs one of GitHub's eight conclusions, got %q", conclusion)
+			return fmt.Errorf("exec: completed needs a conclusion GitHub publishes on a run, got %q — the ledger admits: %s", conclusion, runConclusionList())
 		}
 		if reason != "" {
 			return fmt.Errorf("exec: completed must not carry a refusal reason, got %q", reason)
@@ -348,7 +348,7 @@ func (r Result) Check() error {
 			return fmt.Errorf("exec: conclusion %q on non-completed outcome %q (roll-up rule 1)", r.RunConclusion, r.Outcome)
 		}
 		if !r.RunConclusion.IsGitHub() {
-			return fmt.Errorf("exec: run conclusion %q is not one of GitHub's eight", r.RunConclusion)
+			return fmt.Errorf("exec: run conclusion %q is not one GitHub publishes on a run — the ledger admits: %s", r.RunConclusion, runConclusionList())
 		}
 	}
 	if r.Provenance.InvocationID == "" {

@@ -104,12 +104,29 @@ func currentSchema() *schema {
 
 // futureRoots is the known-future list: accepted with a warning, ignored.
 //
-// The whole block is skipped rather than walked key by key. Every key under it
-// belongs to a phase that has not been designed yet, so this package has
-// nothing to check a sub-key against, and erroring on one would make the
-// operator delete a block the roadmap tells them to keep.
+// The whole block is skipped rather than walked key by key, and the reason is
+// OWNERSHIP, not absence. It used to be written as absence — "every key under
+// it belongs to a phase that has not been designed yet, so this package has
+// nothing to check a sub-key against" — and that stopped being true of every
+// member the moment `drill` joined: Phase 1 designs its four keys precisely,
+// `drill.timezone` down to "required, no default", and internal/shadow
+// already ships the drill_day_zone table. Phase 0 could check
+// those sub-keys. It does not, because a schema validated here would be a
+// SECOND COPY of one the drill package owns, and of two copies the one nobody
+// updates is the one in the phase that does not read the values.
+//
+// Erroring is off the table for a separate reason that does hold for every
+// member: it would make the operator delete a block the roadmap tells them to
+// keep, and a Phase 0 gateway sharing a file with a Phase 1 installation
+// would refuse to start.
 var futureRoots = map[string]string{
-	"backends":  "backends[].kind: act — Phase 1",
+	"backends": "backends[].kind: act — Phase 1",
+	// One key, not the drill block's set of four. `drill.timezone` is the key with no
+	// default — it decides the day boundary, and therefore which run lands in
+	// which day and how the 14/21 window is counted — so it is the one worth
+	// naming. Listing all four would put a hand copy of a Phase 1 key set in a
+	// Phase 0 file, which is the drift this map is trying not to have.
+	"drill":     "drill.timezone — Phase 1",
 	"policy":    "policy.hysteresis / policy.probe / policy.on_no_eligible_backend — Phase 2",
 	"workflows": "workflows[].routable — Phase 2, workflows[].shadow — Phase 1",
 	"remotes":   "remotes — Phase 3",

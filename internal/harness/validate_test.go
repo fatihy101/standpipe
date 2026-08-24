@@ -672,6 +672,78 @@ func TestValidateRefusesCallerDefects(t *testing.T) {
 	}
 }
 
+// TestGitHubValidateNamesTheSetItEnforces pins GitHubRun.Validate's MESSAGES
+// and its width, which are two halves of one defect.
+//
+// All three refusals used to say "one of GitHub's eight" and were still saying
+// eight after `startup_failure` made the set nine (6379deb). The verdicts
+// were right throughout — Validate reads IsGitHub(), which was widened — so
+// nothing that asserts behaviour could see it. This is the path that reads
+// GITHUB's side, so the stale sentence handed an operator a set that would have
+// accepted the very value they were holding.
+//
+// The second half is width: the job and step checks use the RUN-level set on
+// purpose. Narrowing either would refuse a value GitHub really sent, and that
+// does not surface as a bad row — it drops a run out of the gate's denominator.
+func TestGitHubValidateNamesTheSetItEnforces(t *testing.T) {
+	// `in_progress` is a value of GitHub's `status` field and never a
+	// conclusion, so every level refuses it.
+	bad, ok := exec.Conclusion("in_progress"), exec.ConclusionSuccess
+
+	for _, tc := range []struct {
+		level string
+		run   GitHubRun
+	}{
+		{"run", GitHubRun{RunID: 1, Conclusion: bad}},
+		{"job", GitHubRun{RunID: 1, Conclusion: ok, Jobs: []GitHubJob{
+			{Key: JobKey{JobID: "build"}, Conclusion: bad, DeclaredStepCount: 0}}}},
+		{"step", GitHubRun{RunID: 1, Conclusion: ok, Jobs: []GitHubJob{
+			{Key: JobKey{JobID: "build"}, Conclusion: ok, DeclaredStepCount: 1,
+				Steps: []GitHubStep{githubStep(0, 2, "a", bad)}}}}},
+	} {
+		t.Run(tc.level, func(t *testing.T) {
+			err := tc.run.Validate()
+			if err == nil {
+				t.Fatal("a `status` value was accepted as a conclusion")
+			}
+			msg := err.Error()
+			for _, c := range exec.RunConclusions() {
+				if !strings.Contains(msg, string(c)) {
+					t.Errorf("the %s refusal does not name %q, which it would have accepted:\n\t%s", tc.level, c, msg)
+				}
+			}
+			// A size is a hand copy of the set. It is what went stale.
+			for _, size := range []string{"eight", "nine", "ten"} {
+				if strings.Contains(msg, size) {
+					t.Errorf("the %s refusal asserts the set's size (%q) instead of naming it:\n\t%s", tc.level, size, msg)
+				}
+			}
+		})
+	}
+
+	// The width, asserted at every level: `startup_failure` is measured on runs
+	// and observed on no job and no step, and this side must not narrow on
+	// absence of observation.
+	sf := exec.ConclusionStartupFailure
+	accepted := GitHubRun{RunID: 1, Conclusion: sf, Jobs: []GitHubJob{
+		{Key: JobKey{JobID: "build"}, Conclusion: sf, DeclaredStepCount: 1,
+			Steps: []GitHubStep{githubStep(0, 2, "a", sf)}}}}
+	if err := accepted.Validate(); err != nil {
+		t.Fatalf("a GitHub side carrying `startup_failure` was refused: %v", err)
+	}
+	// And `unmappable` is ours, at no level.
+	for _, r := range []GitHubRun{
+		{RunID: 1, Conclusion: exec.ConclusionUnmappable},
+		{RunID: 1, Conclusion: ok, Jobs: []GitHubJob{{Key: JobKey{JobID: "b"}, Conclusion: exec.ConclusionUnmappable}}},
+		{RunID: 1, Conclusion: ok, Jobs: []GitHubJob{{Key: JobKey{JobID: "b"}, Conclusion: ok,
+			Steps: []GitHubStep{githubStep(0, 2, "a", exec.ConclusionUnmappable)}}}},
+	} {
+		if err := r.Validate(); err == nil {
+			t.Error("`unmappable` was accepted from GitHub; it is this design's own value")
+		}
+	}
+}
+
 // TestAnOutageRunIsEvidenceOfExecutionNeverOfAgreement — an outage run reaches
 // `completed` and enters neither A nor X: there is no GitHub side, so however
 // well it went it says nothing about agreement.

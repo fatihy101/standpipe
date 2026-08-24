@@ -185,18 +185,22 @@ func TestRunAndJobConclusionsAreNotNested(t *testing.T) {
 			"and widening Valid() also widens shadow.ValidStepConclusion, which is subtractive — that is the schema's narrowing to change, not this package's.")
 	}
 
-	// GitHub's own eight are exactly the intersection.
-	eight := []Conclusion{
+	// The INTERSECTION is eight. That is not "GitHub's own", which is nine
+	// since `startup_failure` — it is GitHub's nine minus the run-only member,
+	// and equally the job set minus `unmappable`. This hand list is the one
+	// deliberate second copy here: it is what pins the shared members.
+	shared := []Conclusion{
 		ConclusionSuccess, ConclusionFailure, ConclusionCancelled, ConclusionSkipped,
 		ConclusionTimedOut, ConclusionActionRequired, ConclusionNeutral, ConclusionStale,
 	}
-	for _, c := range eight {
+	for _, c := range shared {
 		if !inJob[c] || !inRun[c] {
-			t.Errorf("%q is one of GitHub's eight and must be legal at both levels (job=%v, run=%v)", c, inJob[c], inRun[c])
+			t.Errorf("%q is legal at both levels and one of the sets rejects it (job=%v, run=%v)", c, inJob[c], inRun[c])
 		}
 	}
-	if len(job) != len(eight)+1 || len(run) != len(eight)+1 {
-		t.Errorf("Conclusions() has %d members and RunConclusions() %d; want GitHub's eight plus exactly one own value each: %v / %v", len(job), len(run), job, run)
+	if len(job) != len(shared)+1 || len(run) != len(shared)+1 {
+		t.Errorf("Conclusions() has %d members and RunConclusions() %d; want the %d shared plus exactly one own value each: %v / %v",
+			len(job), len(run), len(shared), job, run)
 	}
 
 	// `in_progress` can NEVER be a member of EITHER set. It is a value of

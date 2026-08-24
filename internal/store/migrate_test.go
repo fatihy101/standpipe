@@ -146,30 +146,146 @@ func TestMigrateRefusesTamperedChecksum(t *testing.T) {
 	}
 	defer db.Close()
 
-	if _, err := db.Migrate(context.Background()); err == nil {
-		t.Fatalf("Migrate accepted a database whose recorded checksum does not match the embedded migration; " +
-			"a divergence between what the database contains and what the build thinks it contains went unreported")
+	// errors.Is, not merely non-nil: the caller of `standpipe migrate` has to be
+	// able to tell a checksum divergence from an out-of-order version or an I/O
+	// failure, and a bare `err != nil` passes for all three.
+	if _, err := db.Migrate(context.Background()); !errors.Is(err, ErrSchemaChecksum) {
+		t.Fatalf("Migrate on a tampered checksum = %v, want ErrSchemaChecksum; "+
+			"a divergence between what the database contains and what the build thinks it contains went unreported", err)
 	}
 }
 
-// TestOpenAcceptsTamperedChecksum documents the same hole from the startup
-// side: if Migrate is the only checksum gate, Open never sees it either.
-// Recorded as an assertion so the day the gate moves, this test says so.
-func TestOpenIgnoresChecksumAtStartup(t *testing.T) {
+// TestOpenRefusesTamperedChecksum is the STARTUP half of the same gate, and it
+// is a different code path from the one above, not a restatement of it.
+// TestMigrateRefusesTamperedChecksum exercises Migrate — the operator command,
+// run deliberately, allowed to repair. This exercises Open — the daemon's own
+// entry, which must repair nothing and must refuse to serve.
+//
+// It replaces TestOpenIgnoresChecksumAtStartup, which fbb768d wrote to
+// DOCUMENT that Open had no checksum gate and which 23efda3 then closed. From
+// that commit until this one the test skipped itself on every run — a tripwire
+// that had already fired and was never picked up. The behaviour it asserted no
+// longer exists on any reachable path, so the assertion is inverted here rather
+// than deleted: deleting it would have left sqlite.go's VerifyAppliedChecksums
+// call with no coverage in the repository at all. Measured — with that call
+// removed, `go test ./...` was green.
+func TestOpenRefusesTamperedChecksum(t *testing.T) {
 	path, cfg := migratedPath(t)
 
 	h := rawSQL(t, path)
 	if _, err := h.Exec(`UPDATE schema_version SET checksum = 'deadbeef' WHERE version = 1`); err != nil {
-		t.Fatalf("tampering: %v", err)
+		t.Fatalf("tampering with schema_version: %v", err)
 	}
-	h.Close()
+	if err := h.Close(); err != nil {
+		t.Fatalf("closing raw handle: %v", err)
+	}
 
 	db, err := Open(context.Background(), cfg)
-	if err != nil {
-		t.Skipf("Open now validates checksums (%v); TestMigrateRefusesTamperedChecksum is the live gate", err)
+	if err == nil {
+		db.Close()
+		t.Fatalf("Open accepted a database whose recorded checksum does not match the embedded migration; " +
+			"the gateway would serve requests against a schema it does not know it has")
 	}
-	db.Close()
-	t.Log("Open() does not verify schema_version.checksum; the only gate is Migrate (see TestMigrateRefusesTamperedChecksum)")
+	if !errors.Is(err, ErrSchemaChecksum) {
+		t.Fatalf("Open on a tampered checksum = %v, want ErrSchemaChecksum", err)
+	}
+
+	// And it refused without rewriting what it refused over. A startup gate that
+	// "corrects" the row it disagreed with destroys the only evidence of the
+	// divergence, and the next start is silently clean.
+	h2 := rawSQL(t, path)
+	var stored string
+	if err := h2.QueryRow(`SELECT checksum FROM schema_version WHERE version = 1`).Scan(&stored); err != nil {
+		t.Fatalf("re-reading schema_version: %v", err)
+	}
+	if stored != "deadbeef" {
+		t.Fatalf("after a refused Open the recorded checksum is %q, want it untouched at \"deadbeef\"; "+
+			"the startup gate repaired the evidence it refused over", stored)
+	}
+}
+
+// TestOpenRefusesAMissingChecksumRowAndMigrateBackfillsIt pins the ONE place
+// the two gates deliberately differ, which is the whole reason
+// verifyAppliedChecksums takes a backfill flag.
+//
+// user_version says version 1 is applied and schema_version has no row for it:
+// a hand-edited user_version, or a file from a build predating the table. The
+// operator command may record what it found; the daemon may not, because
+// writing the row makes the next start look clean without anyone having
+// checked what the database actually contains.
+//
+// Asserted in both directions on purpose. Testing only the refusal would still
+// pass if backfill were removed from Migrate as well, and testing only the
+// backfill would still pass if Open started backfilling too.
+func TestOpenRefusesAMissingChecksumRowAndMigrateBackfillsIt(t *testing.T) {
+	path, cfg := migratedPath(t)
+
+	h := rawSQL(t, path)
+	res, err := h.Exec(`DELETE FROM schema_version WHERE version = 1`)
+	if err != nil {
+		t.Fatalf("deleting the schema_version row: %v", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		t.Fatalf("deleted %d rows, want 1", n)
+	}
+	if err := h.Close(); err != nil {
+		t.Fatalf("closing raw handle: %v", err)
+	}
+
+	db, err := Open(context.Background(), cfg)
+	if err == nil {
+		db.Close()
+		t.Fatalf("Open accepted a database whose user_version claims a migration schema_version has no record of")
+	}
+	if !errors.Is(err, ErrSchemaChecksum) {
+		t.Fatalf("Open on a missing schema_version row = %v, want ErrSchemaChecksum", err)
+	}
+
+	h2 := rawSQL(t, path)
+	var n int
+	if err := h2.QueryRow(`SELECT count(*) FROM schema_version WHERE version = 1`).Scan(&n); err != nil {
+		t.Fatalf("counting schema_version rows: %v", err)
+	}
+	if err := h2.Close(); err != nil {
+		t.Fatalf("closing raw handle: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("the refused Open backfilled the missing schema_version row; " +
+			"a read-only startup check must not repair anything it cannot explain")
+	}
+
+	// The other direction: `standpipe migrate` is the path that may record it.
+	mdb, err := OpenUnchecked(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("OpenUnchecked: %v", err)
+	}
+	if _, err := mdb.Migrate(context.Background()); err != nil {
+		mdb.Close()
+		t.Fatalf("Migrate over a missing schema_version row: %v", err)
+	}
+	if err := mdb.Close(); err != nil {
+		t.Fatalf("closing the migrate handle: %v", err)
+	}
+
+	h3 := rawSQL(t, path)
+	var stored string
+	if err := h3.QueryRow(`SELECT checksum FROM schema_version WHERE version = 1`).Scan(&stored); err != nil {
+		t.Fatalf("Migrate did not backfill the missing schema_version row: %v", err)
+	}
+	if err := h3.Close(); err != nil {
+		t.Fatalf("closing raw handle: %v", err)
+	}
+	if stored != migrations[0].Checksum {
+		t.Fatalf("Migrate backfilled checksum %q, want the embedded %q", stored, migrations[0].Checksum)
+	}
+
+	// And the backfill is enough to make the daemon's gate pass again — which is
+	// what makes the refusal above a REFUSAL rather than a permanent brick.
+	reopened, err := Open(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Open after the migrate-path backfill: %v", err)
+	}
+	reopened.Close()
 }
 
 // TestMigrationsAreContiguousAndStable: the embedded set is well formed, and

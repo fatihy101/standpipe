@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Outcome is the five-valued result state. It is a CLOSED set.
@@ -108,8 +109,10 @@ func RefusalReasons() []RefusalReason { return sortedMembers(refusalReasons) }
 
 // sortedMembers is the one implementation behind every enumerator in this file.
 // Each closed set holds its membership in a map, so a per-type copy of this
-// loop would be four chances to enumerate a set differently from the way its
-// own Valid() reads it — the hand-copy shape this file exists to avoid.
+// loop would give every set here its own chance to enumerate differently from
+// the way its own Valid() reads it — the hand-copy shape this file exists to
+// avoid. (The number of copies is deliberately not written down: it said four
+// while six types used the loop.)
 func sortedMembers[T ~string](set map[T]bool) []T {
 	out := make([]T, 0, len(set))
 	for m := range set {
@@ -220,7 +223,9 @@ const (
 	// admit.
 	scopeRun
 
-	// scopeBoth — GitHub's own eight, which are legal at either level.
+	// scopeBoth — the eight that are legal at EITHER level: GitHub's values
+	// other than `startup_failure`, which is run-only. NOT "GitHub's own",
+	// which is nine and is what RunConclusions() returns.
 	scopeBoth = scopeJob | scopeRun
 )
 
@@ -273,6 +278,24 @@ func Conclusions() []Conclusion { return conclusionsInScope(scopeJob) }
 // Conclusions() itself would both keep a value GitHub never writes and miss one
 // GitHub does — and the second of those aborts an INSERT.
 func RunConclusions() []Conclusion { return conclusionsInScope(scopeRun) }
+
+// runConclusionList renders RunConclusions() for an error message.
+//
+// It exists so that no message in this package asserts the SIZE of the set. Two
+// did — "one of GitHub's eight" — and both survived `startup_failure` making the
+// set nine (2026-08-23, 6379deb): a count written into a string is a copy of the
+// membership map above, and it is the copy an operator reads when a run is
+// refused. Naming
+// the members instead derives the message from the same map IsGitHub() reads,
+// and tells the operator which values would have been accepted.
+func runConclusionList() string {
+	set := RunConclusions()
+	names := make([]string, len(set))
+	for i, c := range set {
+		names[i] = string(c)
+	}
+	return strings.Join(names, ", ")
+}
 
 // conclusionsInScope derives one of the two sets from the shared map, through
 // the same sortedMembers every other enumerator in this file uses.

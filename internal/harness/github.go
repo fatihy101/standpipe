@@ -2,6 +2,7 @@ package harness
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/fatihy101/standpipe/internal/exec"
 )
@@ -16,8 +17,14 @@ type GitHubRun struct {
 	RunID int64
 
 	// Conclusion is the run-level conclusion GitHub published — the unit the
-	// gate is scored in. It must be one of GitHub's eight; `unmappable` is
-	// this design's own value and can never come from GitHub.
+	// gate is scored in. It must be a member of
+	// exec.RunConclusions(); `unmappable` is this design's own value and can
+	// never come from GitHub.
+	//
+	// The SIZE of that set is deliberately not written down here. It was
+	// written as "eight" and was still saying eight after `startup_failure`
+	// made it nine: a set size written into a comment or an error string is a
+	// second copy of the set, and nothing keeps it in step.
 	Conclusion exec.Conclusion
 
 	Jobs []GitHubJob
@@ -82,14 +89,30 @@ func (g GitHubJob) keyed() bool { return g.Key.JobID != "" }
 // Validate rejects a GitHub side that cannot be the right-hand side of an
 // assertion. It does NOT reject unresolved identities — those are a verdict
 // (row 7), not a caller error.
+//
+// ALL THREE LEVELS ARE CHECKED AGAINST THE SAME SET — exec.RunConclusions(),
+// via IsGitHub() — and that is deliberate rather than sloppy. This function
+// validates GITHUB's side, so the only safe direction is the widest set GitHub
+// is known to publish. `startup_failure` has been measured on RUNS and observed
+// on no job and no step, but absence of observation is not evidence of absence:
+// narrowing the job or step check would make this refuse a value GitHub really
+// sent, which does not surface as a bad row — it refuses a legitimate
+// comparison and removes a run from the gate's denominator.
+//
+// The narrower sets exist and are NOT the right ones here. exec.Conclusions()
+// is the JOB set, but it is what an ENGINE may produce (`unmappable` in,
+// `startup_failure` out) — the wrong side of the comparison entirely. And
+// internal/shadow narrows steps further still, to seven; that is a STORAGE
+// choice the ledger makes about its own columns, this package does not import shadow,
+// and it must not inherit a narrowing made for another reason.
 func (r GitHubRun) Validate() error {
 	if !r.Conclusion.IsGitHub() {
-		return fmt.Errorf("harness: GitHubRun.Conclusion %q is not one of GitHub's eight — `unmappable` is this design's value and cannot come from GitHub", r.Conclusion)
+		return fmt.Errorf("harness: GitHubRun.Conclusion %q is not one GitHub publishes — GitHub's set is: %s. `unmappable` is this design's own value and cannot come from GitHub", r.Conclusion, githubConclusionList())
 	}
 	seen := map[JobKey]bool{}
 	for i, j := range r.Jobs {
 		if !j.Conclusion.IsGitHub() {
-			return fmt.Errorf("harness: GitHubRun.Jobs[%d] (%s) conclusion %q is not one of GitHub's eight", i, j.Name, j.Conclusion)
+			return fmt.Errorf("harness: GitHubRun.Jobs[%d] (%s) conclusion %q is not one GitHub publishes — GitHub's set is: %s", i, j.Name, j.Conclusion, githubConclusionList())
 		}
 		if j.keyed() {
 			if seen[j.Key] {
@@ -99,9 +122,25 @@ func (r GitHubRun) Validate() error {
 		}
 		for si, s := range j.Steps {
 			if !s.Conclusion.IsGitHub() {
-				return fmt.Errorf("harness: GitHubRun.Jobs[%d].Steps[%d] (%s) conclusion %q is not one of GitHub's eight", i, si, s.Name, s.Conclusion)
+				return fmt.Errorf("harness: GitHubRun.Jobs[%d].Steps[%d] (%s) conclusion %q is not one GitHub publishes — GitHub's set is: %s", i, si, s.Name, s.Conclusion, githubConclusionList())
 			}
 		}
 	}
 	return nil
+}
+
+// githubConclusionList renders the set all three checks above enforce.
+//
+// It formats exec.RunConclusions() rather than holding any membership of its
+// own: the copy that goes stale is a copy of the SET, and there is none here.
+// (internal/exec renders the same set for its own messages through its own
+// unexported helper. Two renderers, one enumerator — the duplication is the
+// strings.Join, not the vocabulary.)
+func githubConclusionList() string {
+	set := exec.RunConclusions()
+	names := make([]string, len(set))
+	for i, c := range set {
+		names[i] = string(c)
+	}
+	return strings.Join(names, ", ")
 }

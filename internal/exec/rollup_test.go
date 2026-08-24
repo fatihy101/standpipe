@@ -2,6 +2,7 @@ package exec
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -168,6 +169,44 @@ func TestCanonicalStepIDIsTheJoinKey(t *testing.T) {
 	}
 }
 
+// TestConclusionRefusalsNameTheSetTheyEnforce pins the message, not just the
+// verdict.
+//
+// Both IsGitHub() refusals in this package used to assert the set's SIZE — "one
+// of GitHub's eight" — and both were still saying eight after `startup_failure`
+// made it nine. The verdict was right the whole time; only the
+// sentence an operator reads was wrong, which is why no test caught it. So this
+// asserts that each message names every member of the set it enforces and
+// states no size at all.
+func TestConclusionRefusalsNameTheSetTheyEnforce(t *testing.T) {
+	// `in_progress` is a status, never a conclusion, so both sites refuse it.
+	empty := Result{Provenance: Provenance{InvocationID: "i"}}
+	finaliseErr := empty.Finalise(OutcomeCompleted, "", Conclusion("in_progress"))
+	stored := Result{
+		Outcome:       OutcomeCompleted,
+		RunConclusion: Conclusion("in_progress"),
+		Provenance:    Provenance{InvocationID: "i"},
+	}
+	checkErr := stored.Check()
+	if finaliseErr == nil || checkErr == nil {
+		t.Fatalf("a status value was accepted as a conclusion (Finalise=%v, Check=%v)", finaliseErr, checkErr)
+	}
+
+	for site, msg := range map[string]string{"Finalise": finaliseErr.Error(), "Check": checkErr.Error()} {
+		for _, c := range RunConclusions() {
+			if !strings.Contains(msg, string(c)) {
+				t.Errorf("%s's refusal does not name %q, which it would have accepted:\n\t%s", site, c, msg)
+			}
+		}
+		// A size is a hand copy of the set. It is what went stale.
+		for _, size := range []string{"eight", "nine", "ten", " 8 ", " 9 "} {
+			if strings.Contains(msg, size) {
+				t.Errorf("%s's refusal asserts the set's size (%q) instead of naming it:\n\t%s", site, size, msg)
+			}
+		}
+	}
+}
+
 // TestFinaliseIsTheOnlyWayToConclude holds the ledger's CHECKs one level above the
 // database, so a Result that could not be stored cannot be passed around either.
 func TestFinaliseIsTheOnlyWayToConclude(t *testing.T) {
@@ -178,7 +217,11 @@ func TestFinaliseIsTheOnlyWayToConclude(t *testing.T) {
 		conclusion Conclusion
 		wantErr    bool
 	}{
-		{"completed with one of GitHub's eight", OutcomeCompleted, "", ConclusionSuccess, false},
+		{"completed with a conclusion GitHub publishes", OutcomeCompleted, "", ConclusionSuccess, false},
+		// The run-only member. Finalise and Check both read IsGitHub(), so a
+		// row here covers both sites; without it the only conclusion either
+		// site is exercised with is one that was legal before `startup_failure` was admitted.
+		{"completed with startup_failure", OutcomeCompleted, "", ConclusionStartupFailure, false},
 		{"completed with unmappable", OutcomeCompleted, "", ConclusionUnmappable, true},
 		{"completed with no conclusion", OutcomeCompleted, "", "", true},
 		{"completed carrying a reason", OutcomeCompleted, RefusalTokenAbsent, ConclusionSuccess, true},

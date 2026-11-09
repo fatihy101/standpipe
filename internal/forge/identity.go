@@ -26,7 +26,7 @@ import (
 //
 // contents is READ. `contents: write` is never requested — the gateway never
 // writes to a workflow file; the operator adds the standby_trigger_id input
-// by hand during setup. A future edit that changes this constant is
+// by hand during setup (docs/setup.md). A future edit that changes this constant is
 // caught at construction by New.
 const (
 	permissionActions  = "write" // dispatching a workflow run
@@ -397,7 +397,7 @@ func (t *identity) installationID(ctx context.Context, repo Repo) (int64, error)
 			// to avoid a misleading name would silence the alert exactly when
 			// the gateway is most broken. An App-LEVEL gauge would be the
 			// honest addition, and inventing one belongs in the metrics
-			// catalog, not at an emission site.
+			// catalog (docs/reference/metrics.md), not at an emission site.
 			t.metrics.SetGauge("gateway_target_unavailable", 1, map[string]string{"repo": key})
 			return 0, t.notFoundOnAppCall(repo, e, err,
 				"the App may not be installed there, or the repo may not exist or "+

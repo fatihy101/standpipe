@@ -1,4 +1,5 @@
-// Package metrics is the gateway's Prometheus registry.
+// Package metrics is the gateway's Prometheus registry (see
+// docs/reference/metrics.md).
 //
 // It is deliberately hand-written rather than client_golang: the exposition
 // this project needs is one text endpoint on the admin listener, and the
@@ -73,7 +74,7 @@ var DefaultBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5,
 var writeBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 5}
 
 // Catalog is the metrics table, in its order — all thirty rows, name, type and
-// label set.
+// label set. docs/reference/metrics.md is the published form of it.
 //
 // It began as a hand transcription of a document, and on 2026-08-22 three of
 // its rows were wrong: gateway_target_unavailable carried a {workflow} label the
@@ -83,7 +84,7 @@ var writeBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.
 // internal/forge/identity.go emits AGREED, and the transcription alone made
 // Drift() non-empty, on the very field the admin /healthz publishes as metrics_drift. A
 // runtime drift surface cannot audit the copy that defines it, so the copy has
-// to be compared against the table itself by something executable.
+// to be compared against the published reference by something executable.
 //
 // The two earlier code-side divergences recorded here are both closed and the
 // note is kept so neither is reopened by memory: the table declares

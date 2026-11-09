@@ -219,7 +219,7 @@ type RateSnapshot struct {
 }
 
 // snapshot returns every bucket's last observation, for /metrics and for the
-// detailed health endpoint.
+// detailed health endpoint (docs/reference/health.md).
 func (l *limiter) snapshot() []RateSnapshot {
 	l.mu.Lock()
 	out := make([]RateSnapshot, 0, len(l.buckets))

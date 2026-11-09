@@ -102,7 +102,8 @@ func (db *DB) WorkflowDefinition(ctx context.Context, repo, workflow, ref string
 	return scanWorkflowCache(row)
 }
 
-// WorkflowCacheAll returns every cached definition, for the inventory surface.
+// WorkflowCacheAll returns every cached definition, for the inventory surface
+// (see docs/setup.md).
 func (db *DB) WorkflowCacheAll(ctx context.Context) ([]WorkflowCacheEntry, error) {
 	rows, err := db.reader.QueryContext(ctx, selectWorkflowCacheSQL+` ORDER BY repo, workflow, ref`)
 	if err != nil {

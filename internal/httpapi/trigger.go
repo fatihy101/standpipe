@@ -82,7 +82,8 @@ type reqCtx struct {
 	reasonText string
 }
 
-// handleTrigger is the trigger request-processing order, step by step.
+// handleTrigger is the trigger request-processing order, step by step (see
+// docs/architecture.md).
 //
 // The order is not stylistic. Step 6 (the per-IP limit) runs BEFORE step 7
 // (authentication) so unauthenticated floods are shed without touching the

@@ -41,7 +41,7 @@
 // why tier 2's silent-death detector (resolver.go's tier2Absent and
 // gateway_run_name_absent_total) was NOT removed as answered.
 //
-// The run_id correlation hierarchy is split across three files and it is worth
+// The run_id correlation hierarchy (docs/architecture.md) is split across three files and it is worth
 // knowing where each tier lives before changing any of them:
 //
 //	tier 1  dispatch.go  — return_run_details on the request, run id off the

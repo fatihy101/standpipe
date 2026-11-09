@@ -62,7 +62,7 @@ func runConfigValidate(args []string) error {
 		fmt.Printf("warning: %v\n", err)
 	}
 	// A key that IS there and cannot be parsed is a different fact, and it is
-	// an ERROR (the missing-vs-corrupt asymmetry).
+	// an ERROR (the missing-vs-corrupt asymmetry docs/setup.md describes).
 	//
 	// Missing is a deployment fact about another host; corrupt is a mistake on
 	// this one, and `standpiped` refuses to start on it. Answering `valid:
@@ -124,7 +124,7 @@ func runToken(args []string) error {
 	}
 	fs := flag.NewFlagSet("token create", flag.ContinueOnError)
 	caller := fs.String("caller", "", "caller name (the idempotency namespace)")
-	tokenID := fs.String("token-id", "", "token id embedded in the token")
+	tokenID := fs.String("token-id", "", "token id embedded in the token; see docs/reference/tokens.md")
 	role := fs.String("role", "caller", "caller | admin")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err

@@ -3,7 +3,8 @@
 // log, and the inventory reads.
 //
 // No other package writes SQL; Store is the contract the rest of the gateway
-// calls.
+// calls. docs/architecture.md describes where the store sits, and
+// docs/reference/hash-scopes.md lists the trigger log's hash scopes.
 //
 // Four properties this package exists to hold:
 //

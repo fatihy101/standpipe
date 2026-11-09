@@ -11,7 +11,8 @@
 //     internal/forge/limiter.go, and forge's rate-limit error Kinds are
 //     UPSTREAM GitHub errors that must never be reused for a caller 429.
 //   - repo/workflow/caller reach a metric label only after authentication and
-//     allowlist validation, and there is no source_ip label anywhere.
+//     allowlist validation, and there is no source_ip label anywhere (see
+//     docs/reference/metrics.md).
 package httpapi
 
 import (
@@ -231,7 +232,8 @@ func (s *Server) handlePublicHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
-// adminHealth is the admin /healthz's detailed body.
+// adminHealth is the admin /healthz's detailed body (see
+// docs/reference/health.md).
 type adminHealth struct {
 	Status        string `json:"status"`
 	Version       string `json:"version"`

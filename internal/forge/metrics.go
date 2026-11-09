@@ -5,8 +5,9 @@ package forge
 // its signatures.
 //
 // This list is the whole of what package forge emits, and every entry is
-// checked against the metrics catalog, internal/metrics.Catalog(). A name
-// or a label set that appears in one and not the other surfaces at runtime through that package's Drift() — the list
+// checked against the metrics catalog, internal/metrics.Catalog() (published
+// as docs/reference/metrics.md). A name or a label set that appears in one and
+// not the other surfaces at runtime through that package's Drift() — the list
 // below is not the authority, it is the map.
 //
 // Counters this package emits:

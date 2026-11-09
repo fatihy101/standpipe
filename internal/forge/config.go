@@ -91,7 +91,7 @@ type Config struct {
 	UserAgent string
 }
 
-// Defaults.
+// Defaults, as documented in docs/setup.md.
 const (
 	DefaultMaxInflight              = 4
 	DefaultMaxQueueWait             = 2 * time.Second

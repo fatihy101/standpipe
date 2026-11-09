@@ -20,7 +20,7 @@ import (
 // attach them to authenticated failures.
 //
 // The distinction is the whole value of the field to an operator: "GitHub is
-// not answering" is the case the direct-call runbook covers, and "GitHub is answering and refusing
+// not answering" is the case the direct-call runbook in docs/ covers, and "GitHub is answering and refusing
 // our credential" is not — it is a key or an installation to fix, and reaching
 // for the direct-call procedure wastes the outage on the wrong hypothesis.
 type githubContact struct {

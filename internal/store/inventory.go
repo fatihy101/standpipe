@@ -410,7 +410,7 @@ type SurfaceRow struct {
 	Repo     string
 	Workflow string
 	Triggers []string
-	// CorrelationReady: standby_trigger_id is declared in the
+	// CorrelationReady (see docs/setup.md): standby_trigger_id is declared in the
 	// cached inputs definition, so the run-name correlation path is
 	// available for this workflow.
 	CorrelationReady bool

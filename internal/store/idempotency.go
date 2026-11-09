@@ -166,7 +166,8 @@ ON CONFLICT(caller_name, idempotency_key) DO NOTHING`
 // took no reservation and forwarded nothing; a trigger row for them would
 // enter the resolver queue and the coverage join as if a run had
 // been dispatched. The counters gateway_idempotency_replay_total and
-// gateway_idempotency_conflict_total are the surface for those.
+// gateway_idempotency_conflict_total are the surface for those (see
+// docs/reference/metrics.md).
 // Rejections that happen BEFORE the reservation are a different class and have
 // their own parentless event: AppendTriggerRejected.
 func (db *DB) Reserve(ctx context.Context, req ReserveRequest) (ReserveResult, error) {

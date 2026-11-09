@@ -9,7 +9,7 @@ import (
 )
 
 // Resolver establishes the run_id ↔ trigger_event_id link (the correlation
-// hierarchy).
+// hierarchy, see docs/architecture.md).
 //
 // It is QUERY-BASED, not timer-based. The ticker below is only a wake-up: the
 // set of work is re-derived from the database on every sweep by

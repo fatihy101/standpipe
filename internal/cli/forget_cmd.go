@@ -13,7 +13,7 @@ import (
 // `user_agent` — and nothing else. Two properties make that safe, and both
 // live in internal/store rather than here:
 //
-//  1. The content_sha256 hash scope EXCLUDES the redactable fields, so
+//  1. The content_sha256 hash scope (docs/reference/hash-scopes.md) EXCLUDES the redactable fields, so
 //     redaction does not invalidate a single digest. The event log stays
 //     verifiable after a GDPR erasure; that is what the exclusion is for.
 //  2. Redaction covers `trigger` AND `trigger_rejected`.

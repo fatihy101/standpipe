@@ -67,8 +67,8 @@ const (
 //
 // The ordering follows DURABILITY, not strength: injected wins even when layer
 // 1 was also requested, because layer 2 is the one that survives a lost
-// dispatch response. The correlation_ready field of `standpipe
-// inventory` reads exactly that distinction.
+// dispatch response. The correlation_ready report in the setup guide
+// (docs/setup.md) reads exactly that distinction.
 type Correlation string
 
 const (
@@ -388,7 +388,8 @@ type WorkflowCacheEntry struct {
 }
 
 // CorrelationReady reports whether standby_trigger_id is defined in the cached
-// inputs definition (the correlation_ready field of `standpipe inventory`). It is what makes conditional injection
+// inputs definition (the correlation_ready field of `standpipe inventory`; see
+// docs/setup.md). It is what makes conditional injection
 // observable; a false here is the answer to "why is the unknown rate high".
 func (e WorkflowCacheEntry) CorrelationReady() bool { return e.hasInput(reservedInputKey) }
 

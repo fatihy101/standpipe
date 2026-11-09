@@ -12,10 +12,10 @@ import (
 // ---------------------------------------------------------------------------
 // THE HALF OF THE GATEWAY THAT HAS NEVER MET REAL GITHUB.
 //
-// To say it plainly: the 2026-08-21 measurements were made with curl
-// against api.github.com, NOT through the gateway, so App JWT minting,
+// The setup guide (docs/setup.md) says it plainly: the 2026-08-21 measurements were made with curl
+// against api.github.com, NOT through the gateway, so "App JWT minting,
 // installation-token minting and renewal, the per-installation quota bucket,
-// and the injection -> matching chain have only ever run against the fake.
+// and the injection -> matching chain" have only ever run against the fake.
 //
 // The fake DOES NOT READ the Authorization header (that is deliberate — see
 // testutil.GitHub.Authorizations), so until this file existed every test in

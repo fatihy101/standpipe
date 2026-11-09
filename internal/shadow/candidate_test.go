@@ -16,10 +16,12 @@ import (
 // through the join" measurement, retained as tests.
 //
 // The candidate axis is no longer specified as a DDL fence: it has a thirty-row
-// rule table, each row naming the shipped constraint that holds it, driven against the schema
+// rule table (docs/reference/drill-rules.md), each
+// row naming the shipped constraint that holds it, driven against the schema
 // the MIGRATIONS build rather than against a clean copy of a design document. That
 // drive lived in one transcript. This file re-runs the part of it that reads
-// as behaviour a caller can see.
+// as behaviour a caller can see; ruletable_test.go re-runs the part that binds
+// each rule NUMBER to the shipped NAME, in both directions.
 
 const candDay = "2026-05-01"
 

@@ -27,7 +27,8 @@ type Store interface {
 	// where the dispatch succeeded and the run id was lost.
 	Complete(ctx context.Context, req store.CompleteRequest) (store.CompleteResult, error)
 
-	// InputsHash computes the HMAC over the canonical inputs.
+	// InputsHash computes the HMAC over the canonical inputs (see
+	// docs/reference/hash-scopes.md).
 	InputsHash(ctx context.Context, canonicalInputs []byte) (string, error)
 	// WorkflowDefinition backs the allowlist's default-branch check. ErrNotFound means
 	// the definition was never fetched, which is 403 default_branch_unknown

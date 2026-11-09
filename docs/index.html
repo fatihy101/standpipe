@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Standpipe Docs</title>
+<meta name="description" content="Standpipe keeps your CI running when GitHub Actions' control plane does not.">
+<style>
+  :root {
+    --bg: #fbfaf8;
+    --surface: #ffffff;
+    --text: #1d1d1f;
+    --muted: #5d5d66;
+    --border: #e3e1dc;
+    --accent: #1f6feb;
+    --accent-soft: #e8f0fe;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --warn-soft: #fff8e1;
+    --bad: #cf222e;
+    --code-bg: #f3f2ef;
+    --node: #ffffff;
+    --node-gh: #f1f3f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111214;
+      --surface: #191a1d;
+      --text: #e8e8ea;
+      --muted: #a0a0aa;
+      --border: #2e3035;
+      --accent: #58a6ff;
+      --accent-soft: #15233a;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --warn-soft: #2a2312;
+      --bad: #f85149;
+      --code-bg: #1f2024;
+      --node: #1f2024;
+      --node-gh: #23262c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111214;
+    --surface: #191a1d;
+    --text: #e8e8ea;
+    --muted: #a0a0aa;
+    --border: #2e3035;
+    --accent: #58a6ff;
+    --accent-soft: #15233a;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --warn-soft: #2a2312;
+    --bad: #f85149;
+    --code-bg: #1f2024;
+    --node: #1f2024;
+    --node-gh: #23262c;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  a { color: var(--accent); }
+  .layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 48px;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 24px 96px;
+  }
+  nav.toc {
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    font-size: 14px;
+  }
+  nav.toc .brand { font-weight: 700; font-size: 18px; margin-bottom: 16px; display: block; color: var(--text); text-decoration: none; }
+  nav.toc ol { list-style: none; padding: 0; margin: 0; }
+  nav.toc li { margin: 6px 0; }
+  nav.toc li.sub { padding-left: 14px; font-size: 13px; }
+  nav.toc a { color: var(--muted); text-decoration: none; }
+  nav.toc a:hover { color: var(--text); }
+  main { min-width: 0; }
+  h1 { font-size: 40px; line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; }
+  h2 { font-size: 26px; margin: 64px 0 12px; letter-spacing: -0.01em; padding-top: 8px; border-top: 1px solid var(--border); }
+  h3 { font-size: 19px; margin: 36px 0 8px; }
+  .lede { font-size: 19px; color: var(--muted); margin: 0 0 24px; max-width: 46em; }
+  p, li { max-width: 46em; }
+  code { font: 0.9em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font: 13.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  pre code { background: none; padding: 0; }
+  .callout {
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--warn);
+    background: var(--warn-soft);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 20px 0;
+  }
+  .callout.info { border-left-color: var(--accent); background: var(--accent-soft); }
+  .callout p { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 15px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .table-wrap { overflow-x: auto; }
+  .pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+  .pill.done { color: var(--ok); }
+  .pill.wip { color: var(--warn); }
+  .pill.todo { color: var(--muted); }
+  figure { margin: 24px 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  figcaption { color: var(--muted); font-size: 14px; margin-top: 10px; }
+  svg.diagram { width: 100%; height: auto; display: block; }
+  svg.diagram .n { fill: var(--node); stroke: var(--border); stroke-width: 1.5; }
+  svg.diagram .gh { fill: var(--node-gh); stroke: var(--border); stroke-width: 1.5; stroke-dasharray: 5 4; }
+  svg.diagram .sp { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  svg.diagram .down { fill: none; stroke: var(--bad); stroke-width: 2; }
+  svg.diagram text { fill: var(--text); font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  svg.diagram text.t { font-weight: 600; }
+  svg.diagram text.m { fill: var(--muted); font-size: 11.5px; }
+  svg.diagram text.bad { fill: var(--bad); font-weight: 600; font-size: 12px; }
+  svg.diagram text.okt { fill: var(--ok); font-weight: 600; font-size: 12px; }
+  svg.diagram .l { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  svg.diagram .la { stroke: var(--accent); stroke-width: 2; fill: none; }
+  svg.diagram .lb { stroke: var(--bad); stroke-width: 1.5; fill: none; stroke-dasharray: 4 4; }
+  svg.diagram .lo { stroke: var(--ok); stroke-width: 2; fill: none; stroke-dasharray: 6 4; }
+  ol.steps { padding-left: 22px; }
+  ol.steps li { margin: 6px 0; }
+  .theme-toggle { margin-top: 24px; background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
+
+  @media (max-width: 820px) {
+    .layout { grid-template-columns: 1fr; gap: 0; padding: 24px 16px 64px; }
+    nav.toc { position: static; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+    nav.toc ol { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    nav.toc li.sub { display: none; }
+    h1 { font-size: 30px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc" aria-label="Contents">
+  <a class="brand" href="#top">Standpipe</a>
+  <ol>
+    <li><a href="#purpose">Purpose &amp; goals</a></li>
+    <li class="sub"><a href="#problem">The problem</a></li>
+    <li class="sub"><a href="#goals">Goals</a></li>
+    <li class="sub"><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#how">How it works</a></li>
+    <li class="sub"><a href="#chart">Architecture</a></li>
+    <li class="sub"><a href="#request">Request flow</a></li>
+    <li class="sub"><a href="#limits">Known limits</a></li>
+    <li><a href="#start">Getting started</a></li>
+    <li class="sub"><a href="#prereq">Prerequisites</a></li>
+    <li class="sub"><a href="#install">Install</a></li>
+    <li class="sub"><a href="#setup">First caller</a></li>
+    <li><a href="#use">How to use</a></li>
+    <li class="sub"><a href="#cli">CLI reference</a></li>
+    <li class="sub"><a href="#workflow">Workflow hardening</a></li>
+    <li class="sub"><a href="#tunnel">Cloudflare Tunnel</a></li>
+    <li class="sub"><a href="#troubleshoot">Troubleshooting</a></li>
+  </ol>
+  <button class="theme-toggle" type="button" id="themeToggle">Toggle theme</button>
+</nav>
+
+<main id="top">
+  <h1>Standpipe</h1>
+  <p class="lede">Standpipe runs on your own server and keeps your CI going when GitHub Actions stops starting workflows. Your bots and scripts send their triggers to Standpipe instead of GitHub. While GitHub is healthy, Standpipe passes each trigger on to it. During an outage, it will run the workflow on your own machine instead.</p>
+
+  <div class="callout">
+    <p><strong>Status: pre-alpha.</strong> Only Phase 0 runs today: the gateway in observation mode. It authenticates, deduplicates, authorizes, forwards and records every trigger, but it cannot fail over yet. Phase 1's executor, harness and shadow-ledger packages are written and tested but not wired into any binary, and no drill score has been produced. Failover is planned for Phase 2; the <a href="#roadmap">roadmap</a> shows the state of each phase.</p>
+  </div>
+
+  <!-- ───────────────────────── Purpose ───────────────────────── -->
+  <h2 id="purpose">Purpose &amp; goals</h2>
+
+  <h3 id="problem">The problem</h3>
+  <p>GitHub Actions has more incidents than any other GitHub service. In the incident of 6 August 2026, which lasted about 10 hours, GitHub throttled webhook delivery, so pushes and pull requests did not start workflows at all. GitHub reported that self-hosted runners were affected too.</p>
+  <p>A self-hosted runner does not decide what to run. It asks GitHub for jobs, and GitHub hands them out from its own queue. Dynamic <code>runs-on</code>, ARC and third-party runner providers all work the same way, downstream of GitHub's event-to-job pipeline, so when that pipeline stops they sit idle along with your own runners.</p>
+
+  <h3 id="goals">Goals</h3>
+  <ul>
+    <li>Own the trigger URL, so a CI job can start even when GitHub's event pipeline cannot create one.</li>
+    <li>Run GitHub's self-hosted runners on your hardware in normal times, and fall back to a local executor during an outage.</li>
+    <li>Report every degraded result. A skipped check, a cold cache or a failed correlation shows up as a field and a counter, so a result that says success means the work ran.</li>
+    <li>Fit on small hardware: one Go binary and SQLite, with no npm. The optional Phase 2E edge gateway is the only exception, since it deploys with <code>wrangler</code>. It runs on a VPS or a homelab box, and you can expose it through Cloudflare Tunnel.</li>
+  </ul>
+
+  <p>Permanently out of scope: translating Actions YAML to another CI language, a code-review UI or issue tracker, a general artifact store, GHES installation, and selling a hosted runner service. Managing runners on your own machines is in scope.</p>
+
+  <h3 id="roadmap">Roadmap</h3>
+  <p>The work runs on two independent tracks. Track A (CI failover) is a complete product by itself and needs nothing from Track B.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Phase</th><th>What</th><th>Done when</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td><strong>0</strong></td><td>Gateway, observation mode</td><td>A real caller goes through the gateway; <code>inventory</code> shows the trigger map and coverage gap; <code>routing.json</code> is committed; a direct-call runbook exists</td><td><span class="pill wip">3 of 4</span></td></tr>
+      <tr><td><strong>1a</strong></td><td>Runner host, everyday value</td><td>One-click GitHub App setup (App Manifest), with runner permissions in a separate, optional runner App so the gateway's App keeps its three permissions; <code>standpipe runner</code> registers ephemeral self-hosted runners on your box; a real repo's CI runs on them for 14 days</td><td><span class="pill todo">planned</span></td></tr>
+      <tr><td><strong>1</strong></td><td><code>act</code> executor, shadow mode</td><td>A workflow runs end to end while GitHub is unreachable; the ref poller produces synthetic triggers; <code>drill --exec</code> produces a score</td><td><span class="pill wip">partial</span></td></tr>
+      <tr><td><strong>2</strong></td><td>Routing</td><td>Promotion gate passed; <code>route</code> can be flipped by hand; the status write-back queue drains. The CI product is complete at this phase.</td><td><span class="pill todo">planned</span></td></tr>
+      <tr><td><strong>2E</strong></td><td>Edge gateway (optional)</td><td>A second implementation of the gateway in TypeScript and Hono. It deploys to Cloudflare Workers with <code>wrangler</code>, or runs on Node, Bun or Deno, and passes the same acceptance tests as the Go gateway. Your homelab agent connects out to it, so the homelab needs no inbound connection.</td><td><span class="pill todo">later</span></td></tr>
+      <tr><td>3 to 6</td><td>Track B: archive, standby forge, PR failover, reconcile</td><td>Collaboration failover beyond CI</td><td><span class="pill todo">later</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Moving from Phase 1 to Phase 2 requires 14 consecutive drill-days, at least 20 distinct workflow runs, a run-level <code>conclusion</code> match of at least 95%, and no unexplained mismatch in the last 7 days.</p>
+
+  <!-- ───────────────────────── How it works ───────────────────────── -->
+  <h2 id="how">How it works</h2>
+
+  <h3 id="chart">Architecture</h3>
+  <p>GitHub's control plane has to process an event before a CI job exists. The runner's location only matters after that.</p>
+
+  <figure>
+    <svg class="diagram" viewBox="0 0 760 250" role="img" aria-labelledby="d1t">
+      <title id="d1t">Today: every trigger path goes through GitHub's control plane before reaching any runner</title>
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" style="color:var(--muted)"/></marker>
+        <marker id="arb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--bad)"/></marker>
+      </defs>
+      <text class="t" x="0" y="18">Today</text>
+
+      <rect class="n" x="0" y="50" width="150" height="54" rx="8"/>
+      <text class="t" x="14" y="73">Caller</text>
+      <text class="m" x="14" y="91">bot · cron · script</text>
+
+      <rect class="n" x="0" y="150" width="150" height="54" rx="8"/>
+      <text class="t" x="14" y="173">Push / PR</text>
+      <text class="m" x="14" y="191">git events</text>
+
+      <rect class="gh" x="210" y="34" width="300" height="190" rx="12"/>
+      <text class="m" x="226" y="56">GitHub control plane</text>
+      <rect class="n" x="230" y="70" width="120" height="44" rx="6"/>
+      <text x="244" y="97">REST /dispatches</text>
+      <rect class="n" x="230" y="150" width="120" height="44" rx="6"/>
+      <text x="244" y="177">Webhooks</text>
+      <rect class="n" x="380" y="110" width="110" height="44" rx="6"/>
+      <text x="394" y="137">Job queue</text>
+      <rect class="down" x="222" y="64" width="278" height="148" rx="10"/>
+      <text class="bad" x="300" y="234">fails here, so no job is created</text>
+
+      <rect class="n" x="580" y="60" width="180" height="54" rx="8"/>
+      <text class="t" x="594" y="83">GitHub-hosted runner</text>
+      <rect class="n" x="580" y="150" width="180" height="54" rx="8"/>
+      <text class="t" x="594" y="173">Self-hosted runner</text>
+      <text class="m" x="594" y="191">idle: it only pulls from the queue</text>
+
+      <path class="l" d="M150,77 H230" marker-end="url(#ar)"/>
+      <path class="l" d="M150,177 H230" marker-end="url(#ar)"/>
+      <path class="l" d="M350,92 C365,92 365,125 380,128" marker-end="url(#ar)"/>
+      <path class="l" d="M350,172 C365,172 365,140 380,138" marker-end="url(#ar)"/>
+      <path class="lb" d="M490,125 C535,125 535,87 580,87" marker-end="url(#arb)"/>
+      <path class="lb" d="M490,140 C535,140 535,177 580,177" marker-end="url(#arb)"/>
+    </svg>
+    <figcaption>More runners, faster runners and ARC all sit downstream of the part that fails.</figcaption>
+  </figure>
+
+  <figure>
+    <svg class="diagram" viewBox="0 0 760 300" role="img" aria-labelledby="d2t">
+      <title id="d2t">With Standpipe: the gateway and the ref poller sit upstream of GitHub and can route to a local executor</title>
+      <defs>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+        <marker id="ara" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+        <marker id="aro" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ok)"/></marker>
+      </defs>
+      <text class="t" x="0" y="18">With Standpipe</text>
+
+      <rect class="n" x="0" y="50" width="140" height="54" rx="8"/>
+      <text class="t" x="14" y="73">Caller</text>
+      <text class="m" x="14" y="91">bot · cron · script</text>
+
+      <rect class="n" x="0" y="170" width="140" height="54" rx="8"/>
+      <text class="t" x="14" y="193">Push / PR</text>
+      <text class="m" x="14" y="211">git refs</text>
+
+      <rect class="sp" x="190" y="170" width="130" height="54" rx="8"/>
+      <text class="t" x="204" y="193">Ref poller</text>
+      <text class="m" x="204" y="211">git ls-remote</text>
+
+      <rect class="sp" x="370" y="50" width="150" height="174" rx="10"/>
+      <text class="t" x="386" y="78">standpiped</text>
+      <text class="m" x="386" y="98">authenticate</text>
+      <text class="m" x="386" y="116">deduplicate</text>
+      <text class="m" x="386" y="134">authorize</text>
+      <text class="m" x="386" y="152">record (SQLite)</text>
+      <text class="m" x="386" y="170">route</text>
+
+      <rect class="gh" x="580" y="34" width="180" height="96" rx="10"/>
+      <text class="t" x="596" y="60">GitHub</text>
+      <text class="m" x="596" y="80">API → queue → runner</text>
+      <text class="m" x="596" y="98">(runner can be on</text>
+      <text class="m" x="596" y="114"> your box: Phase 1a)</text>
+
+      <rect class="n" x="580" y="170" width="180" height="76" rx="10"/>
+      <text class="t" x="596" y="196">Standby executor</text>
+      <text class="m" x="596" y="216">act on your own box</text>
+      <text class="m" x="596" y="232">(Phases 1 and 2)</text>
+
+      <path class="la" d="M140,77 H370" marker-end="url(#ara)"/>
+      <path class="l" d="M140,197 H190" marker-end="url(#ar2)"/>
+      <path class="la" d="M320,197 H370" marker-end="url(#ara)"/>
+      <path class="la" d="M520,90 H580" marker-end="url(#ara)"/>
+      <text class="okt" x="526" y="80">healthy</text>
+      <path class="lo" d="M520,205 H580" marker-end="url(#aro)"/>
+      <text class="okt" x="526" y="196">outage</text>
+      <text class="m" x="0" y="285">During partial outages git reads usually keep working, so the poller still sees pushes.</text>
+    </svg>
+    <figcaption>Callers reach the gateway before GitHub does, and the ref poller picks up pushes without using webhooks.</figcaption>
+  </figure>
+
+  <h3>Trigger paths and coverage</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Path</th><th>Carried today by</th><th>In Standpipe</th></tr></thead>
+    <tbody>
+      <tr><td>Programmatic dispatch</td><td>GitHub REST API</td><td>Gateway, from Phase 0</td></tr>
+      <tr><td>Push / PR</td><td>GitHub webhooks</td><td>Ref poller: produced in Phase 1, routed in Phase 2</td></tr>
+      <tr><td>Scheduled (<code>schedule</code>)</td><td>GitHub cron</td><td>Local cron calling the gateway (Phase 2)</td></tr>
+      <tr><td><code>repository_dispatch</code></td><td>GitHub REST API</td><td>No trigger surface; reported as a <em>structural</em> coverage gap</td></tr>
+      <tr><td>Other events</td><td>GitHub webhooks</td><td>Out of scope (<code>deployment</code>, <code>check_run</code>, <code>merge_group</code>…)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>The coverage gap is the set of triggers that appear in run history but never went through the gateway. It will not reach zero, and Standpipe reports it in two classes: <code>migratable</code> (a known caller using <code>workflow_dispatch</code>, so you can move it to the gateway) and <code>structural</code> (manual UI triggers, <code>repository_dispatch</code>, accepted direct calls).</p>
+
+  <h3 id="request">Request flow (Phase 0)</h3>
+  <figure>
+    <svg class="diagram" viewBox="0 0 760 330" role="img" aria-labelledby="d3t">
+      <title id="d3t">Phase 0 request flow from caller through gateway, SQLite and GitHub, with a background resolver</title>
+      <defs>
+        <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+      </defs>
+      <g>
+        <rect class="n" x="10" y="10" width="110" height="34" rx="6"/><text class="t" x="40" y="32">Caller</text>
+        <rect class="sp" x="200" y="10" width="130" height="34" rx="6"/><text class="t" x="222" y="32">standpiped</text>
+        <rect class="n" x="410" y="10" width="110" height="34" rx="6"/><text class="t" x="440" y="32">SQLite</text>
+        <rect class="gh" x="600" y="10" width="140" height="34" rx="6"/><text class="t" x="645" y="32">GitHub</text>
+      </g>
+      <path class="l" d="M65,44 V320"/><path class="l" d="M265,44 V320"/><path class="l" d="M465,44 V320"/><path class="l" d="M670,44 V320"/>
+
+      <path class="l" d="M65,72 H262" marker-end="url(#ar3)"/>
+      <text x="76" y="66">POST /t/{owner}/{repo}/{workflow}</text>
+      <text class="m" x="276" y="96">rate limit → auth → policy → validate</text>
+      <path class="l" d="M265,120 H462" marker-end="url(#ar3)"/>
+      <text x="276" y="114">reserve key + write event (one txn)</text>
+      <path class="l" d="M265,160 H667" marker-end="url(#ar3)"/>
+      <text x="476" y="154">POST /dispatches</text>
+      <path class="l" d="M670,190 H268" marker-end="url(#ar3)"/>
+      <text x="476" y="184">200 + run id (or 204)</text>
+      <path class="l" d="M265,220 H462" marker-end="url(#ar3)"/>
+      <text x="276" y="214">complete + outcome event</text>
+      <path class="l" d="M265,250 H68" marker-end="url(#ar3)"/>
+      <text x="90" y="244">200 trigger_event_id</text>
+      <path class="l" d="M465,295 H667" marker-end="url(#ar3)" style="stroke-dasharray:4 4"/>
+      <text class="m" x="476" y="289">resolver loop: link runs that are still unlinked</text>
+    </svg>
+    <figcaption>If the gateway cannot write to durable storage, it returns 500 and does not dispatch.</figcaption>
+  </figure>
+  <ul>
+    <li>The idempotency reservation and the trigger event are written in one transaction, so every dispatch has a record and no event id points at nothing.</li>
+    <li>A repeated key with the same body replays the stored response. The same key with a different body returns <code>409 idempotency_conflict</code>. If the first request is still in flight, the gateway returns <code>409 idempotency_in_progress</code> with <code>Retry-After</code> and does not dispatch.</li>
+    <li>Run correlation has three tiers. Tier 1 reads the run id from the dispatch response. Tier 2, for recovery, matches an injected <code>standby_trigger_id</code> through <code>run-name</code>. Tier 3 falls back to a time window. Each result is labelled <code>exact</code>, <code>inferred</code>, <code>ambiguous</code> or <code>none</code>.</li>
+  </ul>
+
+  <h3 id="limits">Known limits</h3>
+  <ul>
+    <li>Deploys that use OIDC cannot run elsewhere: an AWS role that trusts GitHub's issuer will not trust your machine. Phases 1 and 2 run tests and builds, and deploys stay manually approved.</li>
+    <li>In normal times jobs run on GitHub's <code>actions/runner</code>. During an outage they run under <code>act</code>, which matched GitHub's run-level result about 96% of the time in measurement. A matching result does not prove the work ran, so the drill also checks step identity and event payloads.</li>
+    <li>About 40% of real runs talk to GitHub while they execute. Those steps fail in a full outage no matter where they run.</li>
+    <li>Standpipe publishes commit statuses, while Actions produces check runs. A required check that never reports under its name stays pending, so a PR can stay blocked after CI passes.</li>
+    <li>The gateway adds a hop. If it goes down, callers use the committed <code>routing.json</code> and the <a href="runbook.md">direct-call runbook</a>.</li>
+    <li>A self-hosted runner on a public repo lets a fork PR run arbitrary code on your hardware. Phase 1a will default to private repos and ephemeral runners.</li>
+  </ul>
+
+  <!-- ───────────────────────── Getting started ───────────────────────── -->
+  <h2 id="start">Getting started</h2>
+  <p>Getting a first real caller through the gateway takes about 15 minutes, including creating the GitHub App. The full procedure is in <a href="setup.md">docs/setup.md</a>; this page gives the short version.</p>
+
+  <h3 id="prereq">Prerequisites</h3>
+  <ul>
+    <li>Go 1.27+ (to build from source)</li>
+    <li>A GitHub account or organization where you can create a GitHub App</li>
+    <li>A test repository with at least one workflow that has a <code>workflow_dispatch</code> trigger</li>
+  </ul>
+
+  <h3 id="install">Install</h3>
+  <p>There are no release binaries yet. Build both binaries from source:</p>
+<pre><code>git clone https://github.com/fatihy101/standpipe.git
+cd standpipe
+CGO_ENABLED=0 go build -o bin/ ./cmd/...
+# bin/standpiped  — the gateway daemon
+# bin/standpipe   — the operator CLI</code></pre>
+  <p>The build needs no C toolchain (SQLite is pure Go), so <code>GOOS=linux GOARCH=arm64</code> cross-compiles for a Raspberry Pi as well.</p>
+
+  <h3 id="setup">Set up a first caller</h3>
+
+  <h4>1. Create the GitHub App</h4>
+  <p>Go to <em>Settings › Developer settings › GitHub Apps › New GitHub App</em>. Any name and homepage URL will do. Turn the webhook off, since Standpipe does not use it. Grant these three repository permissions and no others:</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Permission</th><th>Level</th><th>Used for</th></tr></thead>
+    <tbody>
+      <tr><td>Actions</td><td>Read and write</td><td>Dispatching workflows</td></tr>
+      <tr><td>Metadata</td><td>Read-only</td><td>Listing repos and workflows</td></tr>
+      <tr><td>Contents</td><td>Read-only</td><td>Reading workflow files to validate <code>inputs</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Note the App ID, generate a private key (<code>.pem</code>), and install the App on your test repository only.</p>
+  <div class="callout"><p>With <code>actions: write</code>, the App can run arbitrary code in that repository's CI. Use a test repository.</p></div>
+  <p>The gateway authenticates as an App because a personal access token belongs to one person, breaks everywhere when it is revoked, and with the <code>repo</code> scope reaches every repository. An installation token lives for one hour and can be limited to a set of repos.</p>
+
+  <h4>2. Write the configuration</h4>
+<pre><code>mkdir -p /etc/standpipe
+cp ~/Downloads/*.private-key.pem /etc/standpipe/github-app.pem
+chmod 600 /etc/standpipe/github-app.pem</code></pre>
+  <p><code>standpipe.yaml</code>:</p>
+<pre><code>github:
+  app_id: 123456                                 # your App ID
+  private_key_path: /etc/standpipe/github-app.pem
+
+storage:
+  sqlite_path: ./standpipe.db
+
+allowed_targets:
+  - repo: you/your-test-repo
+    workflows: [probe.yml]                      # lists here
+    refs: [refs/heads/main]
+
+callers:                                        # a map, keyed by caller name
+  release-bot:
+    token_id: tok_a1
+    token_hash: ""                              # filled in step 3
+    role: caller
+    allow:
+      - repo: you/your-test-repo
+        workflow: probe.yml                     # singular here
+        ref: refs/heads/main</code></pre>
+  <div class="callout info">
+    <p><code>allowed_targets</code> defines a set of targets, so its <code>workflows</code> and <code>refs</code> are lists. A caller's <code>allow</code> is a list of <code>{repo, workflow, ref}</code> triples with singular fields. Use the workflow's file name (<code>probe.yml</code>), not its <code>name:</code>. The gateway rejects short ref names like <code>main</code> because a short name can mean a branch or a tag.</p>
+  </div>
+<pre><code>standpipe config validate --file standpipe.yaml</code></pre>
+
+  <h4>3. Mint a token, then create the schema</h4>
+  <p>Mint the token first, because <code>migrate</code> refuses a config with an empty <code>token_hash</code>.</p>
+<pre><code>standpipe token create --caller release-bot --token-id tok_a1
+# paste the printed token_hash line into standpipe.yaml, then:
+standpipe migrate --config standpipe.yaml</code></pre>
+  <p>The token (<code>spd_tok_a1_…</code>) is shown once. Store it as the caller's secret.</p>
+
+  <h4>4. Onboard the repository</h4>
+<pre><code>standpipe onboard --repo you/your-test-repo</code></pre>
+  <p>Without <code>--workflows</code> it discovers <code>workflow_dispatch</code> workflows and asks for confirmation. It also checks that the App is installed, so a missing installation fails here, before the first trigger.</p>
+
+  <h4>5. Start the gateway</h4>
+<pre><code>standpiped --config standpipe.yaml --listen :8443 --admin-listen 127.0.0.1:9090
+
+# in another terminal
+standpipe status --config standpipe.yaml</code></pre>
+
+  <h4>6. Send a real trigger</h4>
+<pre><code>curl -sS -X POST http://localhost:8443/t/you/your-test-repo/probe.yml \
+  -H "Authorization: Bearer spd_tok_a1_..." \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"ref":"refs/heads/main","inputs":{}}'</code></pre>
+  <p>You should get a 200 whose body has <code>trigger_event_id</code>, and <code>run_id</code> as well when tier 1 correlation worked. Reading <code>event_id</code> instead returns null. Then trace it:</p>
+<pre><code>standpipe trace --config standpipe.yaml &lt;trigger_event_id&gt;</code></pre>
+  <p>The trace should show <code>resolution exact</code>, <code>source dispatch_response (tier 1)</code>, <code>status forwarded</code> and <code>integrity content_sha256 OK</code>.</p>
+
+  <!-- ───────────────────────── How to use ───────────────────────── -->
+  <h2 id="use">How to use</h2>
+  <p>Your callers (release bots, cron jobs, deploy scripts, SaaS webhooks) call the gateway instead of GitHub's <code>/dispatches</code> endpoint. The CLI shows who triggers what and traces any single trigger.</p>
+
+  <h3>Migrating a caller</h3>
+  <ol class="steps">
+    <li>Add the caller under <code>callers</code> with an <code>allow</code> triple per target.</li>
+    <li>Mint its token with <code>standpipe token create</code> and store the token in the caller's secret store.</li>
+    <li>Change the caller's URL from <code>api.github.com/repos/{owner}/{repo}/actions/workflows/{wf}/dispatches</code> to <code>{gateway}/t/{owner}/{repo}/{wf}</code>, add an <code>Idempotency-Key</code> header, and send a full ref (<code>refs/heads/…</code> or <code>refs/tags/…</code>).</li>
+    <li>Run <code>standpipe inventory --human</code> and check that the caller no longer appears in the <code>migratable</code> gap.</li>
+  </ol>
+
+  <h3 id="cli">CLI reference</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>config validate --file F</code></td><td>Loads the config through the daemon's own loader, and parses the App key</td></tr>
+      <tr><td><code>token create --caller C --token-id ID</code></td><td>Mints a caller (or <code>--role admin</code>) token and prints its hash</td></tr>
+      <tr><td><code>migrate --config F [--dry-run]</code></td><td>Creates or upgrades the SQLite schema</td></tr>
+      <tr><td><code>onboard --repo O/R</code></td><td>Discovers workflows, verifies the installation, adds targets and reloads the gateway</td></tr>
+      <tr><td><code>inventory [--human]</code></td><td>Trigger map: workflow <code>on:</code> blocks × run history × gateway log, with the <code>migratable</code> / <code>structural</code> gap</td></tr>
+      <tr><td><code>trace [--json] [--history] EVENT</code></td><td>Full story of one trigger, including run correlation and content-hash integrity (exit 1 if the hash fails)</td></tr>
+      <tr><td><code>status [--json]</code></td><td>Health: exit 1 on a cold workflow cache, low GitHub quota, or an unresolved trigger past the resolver horizon</td></tr>
+      <tr><td><code>export [--since T]</code></td><td>Exports the event log</td></tr>
+      <tr><td><code>forget --before T</code></td><td>Retention: deletes events older than T</td></tr>
+      <tr><td><code>routing generate|validate</code></td><td>Writes or checks <code>routing.json</code>, the committed routing table (the gateway never reads it in Phase 0)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>The admin listener (<code>--admin-listen</code>, localhost only) serves <code>/healthz</code> and Prometheus <code>/metrics</code>.</p>
+
+  <h3 id="workflow">Optional: harden a workflow for outage recovery</h3>
+  <p>Tier 1 correlation needs no change to your workflow. Tier 2 recovers the link to the run when the dispatch response is lost, for example after a timeout or a gateway crash mid-call. To enable it, declare the reserved input and use it in <code>run-name</code>:</p>
+<pre><code>name: release
+run-name: "release • ${{ inputs.standby_trigger_id || github.run_id }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      standby_trigger_id:
+        description: "Standpipe trigger event ID (auto-injected)"
+        required: false
+        type: string</code></pre>
+  <p>The gateway injects the input only when the workflow declares it. It never edits workflow files or requests <code>contents: write</code>, so you add the input yourself.</p>
+
+  <h3 id="tunnel">Exposing the gateway with Cloudflare Tunnel</h3>
+  <p>If Standpipe runs on a homelab box with no public IP, a Cloudflare Tunnel gives callers outside your network an HTTPS URL, and you do not have to open any ports. Expose only the <code>/t/</code> trigger paths. Use a named tunnel with an ingress rule that matches the path:</p>
+<pre><code>cloudflared tunnel create standpipe
+cloudflared tunnel route dns standpipe ci.example.com</code></pre>
+  <p><code>~/.cloudflared/config.yml</code>:</p>
+<pre><code>tunnel: standpipe
+credentials-file: /root/.cloudflared/&lt;tunnel-id&gt;.json
+ingress:
+  - hostname: ci.example.com
+    path: ^/t/
+    service: http://localhost:8443
+  - service: http_status:404</code></pre>
+<pre><code>cloudflared tunnel run standpipe</code></pre>
+  <div class="callout">
+    <p>Do not use <code>cloudflared tunnel --url http://localhost:8443</code>, including for quick tests. It forwards every path on the trigger listener, not only <code>/t/</code>.</p>
+    <p>Never point the tunnel at <code>--admin-listen</code>, which serves <code>/metrics</code> and <code>/inventory</code>. Keep the admin listener on <code>127.0.0.1</code>, or put it behind Cloudflare Access if you need it remotely. The same will apply to the Phase 1a setup page.</p>
+    <p>Today only external callers need the tunnel. From Phase 1a, GitHub's <code>workflow_job</code> webhook, sent by the separate runner App, will also reach the gateway through the tunnel on a second, signature-checked path, which will need its own ingress rule; the path name is chosen in the Phase 1a design. The runner agent and the ref poller are planned to make outbound connections only. Neither exists yet, and that design is not yet verified.</p>
+  </div>
+
+  <h3 id="troubleshoot">Troubleshooting</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Symptom</th><th>Cause</th></tr></thead>
+    <tbody>
+      <tr><td><code>503 app_not_found</code></td><td><code>app_id</code> names no App. Installing will not fix it; correct the ID.</td></tr>
+      <tr><td><code>503 installation_not_found</code></td><td>The App is not installed on the repo, the repo does not exist, or the App cannot see it. <code>standpipe onboard --repo O/R</code> tells the three apart.</td></tr>
+      <tr><td><code>503 credential_expired</code></td><td>The <code>.pem</code> path is wrong or unreadable.</td></tr>
+      <tr><td><code>403 forbidden</code></td><td>Repo or workflow differs between <code>allowed_targets</code>, the caller's <code>allow</code> and the URL. All three must match.</td></tr>
+      <tr><td><code>unknown field(s): …allow[0].workflows</code></td><td>Plural field inside a caller's <code>allow</code>; use <code>workflow</code> / <code>ref</code>.</td></tr>
+      <tr><td><code>409 idempotency_in_progress</code></td><td>The same key is still in flight. Wait for <code>Retry-After</code>; nothing was dispatched twice.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>If the gateway itself is down, follow the <a href="runbook.md">direct-call runbook</a>, which has callers use GitHub's API directly until the gateway is back.</p>
+</main>
+</div>
+<script>
+  (function () {
+    var btn = document.getElementById('themeToggle');
+    var root = document.documentElement;
+    try {
+      var saved = localStorage.getItem('standpipe-theme');
+      if (saved) root.setAttribute('data-theme', saved);
+    } catch (e) {}
+    btn.addEventListener('click', function () {
+      var current = root.getAttribute('data-theme') ||
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      var next = current === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('standpipe-theme', next); } catch (e) {}
+    });
+  })();
+</script>
+</body>
+</html>

@@ -324,7 +324,7 @@ func (c *Client) Dispatch(ctx context.Context, req DispatchRequest, plan Dispatc
 		}
 	}
 
-	// gateway_correlation_total{correlation}. Emitted here rather than
+	// gateway_correlation_total{correlation} (docs/reference/metrics.md). Emitted here rather than
 	// in Plan because a rejected plan never becomes a trigger row, and
 	// counting armament for a request that was never dispatched would inflate
 	// the operator-checklist hardening ratio. Every plan that reaches this point has a

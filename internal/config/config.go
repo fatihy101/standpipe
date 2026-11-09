@@ -1,4 +1,5 @@
-// Package config parses, defaults and validates standpipe.yaml.
+// Package config parses, defaults and validates standpipe.yaml (the reference
+// configuration is in docs/setup.md).
 //
 // Three rules shape it:
 //

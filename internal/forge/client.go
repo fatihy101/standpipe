@@ -87,7 +87,7 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 }
 
 // RateSnapshots exposes the per-bucket quota state for /metrics and the
-// detailed health endpoint.
+// detailed health endpoint (docs/reference/health.md).
 func (c *Client) RateSnapshots() []RateSnapshot { return c.lim.snapshot() }
 
 // tokenTransport authenticates each request with the current installation

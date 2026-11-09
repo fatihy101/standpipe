@@ -14,7 +14,8 @@ import (
 	"github.com/fatihy101/standpipe/internal/config"
 )
 
-// tokenIDRE is the charset a token_id may use ([A-Za-z0-9_-]{1,64}). It
+// tokenIDRE is the charset a token_id may use ([A-Za-z0-9_-]{1,64}; see
+// docs/reference/tokens.md). It
 // matches internal/config's rule, so a token this package mints is one the
 // config file can name.
 var tokenIDRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -48,7 +49,7 @@ const tokenPrefix = "spd"
 // `token create` refuses to emit a token this regex does not match, which is
 // the mechanism that catches a divergence between generator and scanner. A
 // private, more permissive copy of the pattern would defeat that, which is why
-// this value must stay, character for character, the published regex above.
+// this value is asserted against docs/reference/tokens.md by an executable test.
 var tokenScanRE = regexp.MustCompile(`spd_[A-Za-z0-9_-]{1,64}_[A-Za-z0-9]{43}_[0-9a-z]{1,7}`)
 
 // matchesScanRegex reports whether the WHOLE of s is what the published

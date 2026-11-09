@@ -87,8 +87,9 @@ func originForge(s string) string {
 	return s
 }
 
-// triggerHashScope builds the trigger event's closed field list. content_sha256
-// itself and the redactable fields (caller.source_ip, caller.user_agent, reason_text)
+// triggerHashScope builds the trigger event's closed field list (see
+// docs/reference/hash-scopes.md). content_sha256 itself
+// and the redactable fields (caller.source_ip, caller.user_agent, reason_text)
 // are excluded, which is what lets `standpipe forget` NULL them without
 // invalidating the hash.
 func triggerHashScope(ev TriggerEvent) map[string]any {

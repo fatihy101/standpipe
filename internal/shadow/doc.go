@@ -92,4 +92,8 @@
 //     ledger's MAX(day) and GateWindowDays rather than chosen. The rule was not
 //     hypothetical: PurgeDays broke it by deleting a childless `ran` day, which
 //     turned the second audit green by deletion.
+//
+// The drill rules and the candidate axis are summarised in
+// docs/reference/drill-rules.md; the ledger's place in the system is in
+// docs/architecture.md.
 package shadow

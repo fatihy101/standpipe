@@ -20,8 +20,8 @@ const base62alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 // package's own parser reject.
 const base62Width = 43
 
-// MintToken creates a caller token in the format tokenScanRE matches and
-// returns it with the
+// MintToken creates a caller token in the documented format
+// (docs/reference/tokens.md) and returns it with the
 // SHA-256 hash to be written into standpipe.yaml.
 //
 // The plaintext is returned exactly once and stored nowhere. It lives

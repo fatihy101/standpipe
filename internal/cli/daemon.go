@@ -8,7 +8,7 @@ const daemonUsage = `standpiped — Standpipe gateway daemon (Phase 0)
 
 Phase 0 runs in observation mode: authenticate, apply idempotency, authorize,
 forward the request to GitHub unchanged, and record everything. It makes no
-routing decisions and knows no second backend.
+routing decisions and knows no second backend. See docs/architecture.md.
 
 Usage:
   standpiped --config standpipe.yaml [--listen :8443] [--admin-listen 127.0.0.1:9090] [--pid-file PATH]

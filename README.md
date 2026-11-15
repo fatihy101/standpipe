@@ -1,4 +1,4 @@
-# Standpipe
+# [WIP] Standpipe
 
 Standpipe is a self-hosted gateway that sits in front of GitHub Actions. GitHub's Actions control plane is the part of the pipeline that turns an event (a push, a pull request, an API dispatch) into a queued job, and that part can fail: during the incident of 6 August 2026 webhook delivery dropped to about 15%, pushes and pull requests did not start workflows at all, and GitHub reported that self-hosted runners were affected too. Adding self-hosted runners does not help, because a runner only pulls jobs from GitHub's queue. Dynamic `runs-on`, ARC and third-party runner providers all sit downstream of the same failing step. Standpipe owns the trigger URL instead, upstream of GitHub. Your bots, cron jobs and scripts send their triggers to Standpipe. While GitHub is healthy, Standpipe forwards each trigger and records it. The goal is that during an outage it runs the workflow on your own machine instead. That failover does not exist yet.
 
